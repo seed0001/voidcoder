@@ -2,7 +2,7 @@
   "name": "voidcode",
   "version": "0.1.0",
   "description": "VoidCode — a terminal and desktop AI agent harness with an optional SQL-backed execution context.",
-  "main": "src/index.js",
+  "main": "app/main.js",
   "bin": {
     "voidcode": "bin/voidcode.js",
     "voidcode-context": "bin/voidcode-context.js"
@@ -10,7 +10,49 @@
   "scripts": {
     "start": "node bin/voidcode.js",
     "app": "electron app/main.js",
-    "test": "node test/harness.test.js && node test/contextDb.test.js && node test/continuation.test.js"
+    "test": "node test/harness.test.js && node test/contextDb.test.js && node test/continuation.test.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.voidcode.app",
+    "productName": "VoidCode",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "app/**/*",
+      "src/**/*",
+      "bin/**/*",
+      "rules/**/*",
+      "docs/**/*",
+      "models.json",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "models.json",
+        "to": "models.json"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "VoidCode",
+      "artifactName": "VoidCode-Setup-${version}.exe"
+    }
   },
   "engines": {
     "node": ">=20"
@@ -18,7 +60,8 @@
   "author": "Travis",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^33.4.11"
+    "electron": "^33.4.11",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
     "msedge-tts": "^2.0.7",

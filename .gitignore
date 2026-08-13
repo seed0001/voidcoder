@@ -1,6 +1,9 @@
 # ---- Dependencies ----
 node_modules/
 
+# ---- Separate repo (voidcoder-website) nested inside this project ----
+/website/
+
 # ---- Local runtime state / data (never commit) ----
 .voidcode/
 .voidcode-memory.md
