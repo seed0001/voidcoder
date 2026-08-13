@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:;" />
+  <title>VoidCode</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <span id="brand">VOIDCODE</span>
+    <button id="project-btn" title="Change working folder">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+      <span id="project-name">…</span>
+    </button>
+    <div class="spacer"></div>
+    <button id="model-select-btn" title="Switch model">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+      <span id="model-name">…</span>
+    </button>
+    <div id="orb" class="idle" title="idle"></div>
+  </header>
+
+  <div id="body">
+    <aside id="sidebar">
+      <button id="new-session">＋ New session</button>
+      <div id="session-list"></div>
+      <button id="settings-btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </aside>
+
+    <main id="chat-col">
+      <div id="chat"></div>
+      <div id="composer">
+        <div id="composer-status"></div>
+        <div id="composer-row">
+          <button class="cbtn" id="mic-btn" title="Push to talk (Ctrl+Space)">
+            <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>
+          </button>
+          <button class="cbtn" id="handsfree-btn" title="Hands-free conversation (open mic)">
+            <svg viewBox="0 0 24 24"><path d="M3 14v-2a9 9 0 0 1 18 0v2"/><path d="M21 17a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-2a2 2 0 0 1 2-2h3v4zM3 17a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H3v4z"/></svg>
+          </button>
+          <button class="cbtn" id="image-btn" title="Attach an image or screenshot" aria-label="Attach an image or screenshot">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+          </button>
+          <input id="image-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden />
+          <textarea id="input" rows="1" placeholder="Talk or type — Enter to send"></textarea>
+          <button class="cbtn on" id="speak-btn" title="Speak replies aloud">
+            <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          </button>
+          <button class="cbtn hidden" id="stop-btn" title="Stop">
+            <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          </button>
+          <button class="cbtn" id="send-btn" title="Send">
+            <svg viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></svg>
+          </button>
+        </div>
+        <div id="image-previews" class="hidden" aria-live="polite"></div>
+      </div>
+    </main>
+
+    <aside id="right-panel">
+      <div id="right-tabs">
+        <button data-pane="review" class="active">Review</button>
+        <button data-pane="todos">Plan</button>
+        <button data-pane="schedule">Schedule</button>
+        <button data-pane="focus">Focus</button>
+      </div>
+      <div class="rp-pane" id="pane-review"><div class="rp-empty">No file changes yet</div></div>
+      <div class="rp-pane hidden" id="pane-todos"><div class="rp-empty">No plan yet</div></div>
+      <div class="rp-pane hidden" id="pane-schedule"><div class="rp-empty">No scheduled tasks</div></div>
+      <div class="rp-pane hidden" id="pane-focus"><div id="focus-panel"><div class="fp-empty">No active focus sessions</div></div></div>
+    </aside>
+  </div>
+</div>
+
+<div id="modal-backdrop" class="hidden">
+  <div id="settings-modal">
+    <h2>Settings</h2>
+    <div class="set-note" id="settings-path"></div>
+
+    <h3>Model</h3>
+    <div class="set-grid">
+      <label class="wide">Model (provider/model)
+        <input id="st-model" placeholder="openrouter/anthropic/claude-sonnet-4.5" />
+      </label>
+    </div>
+
+    <h3>API keys</h3>
+    <div class="set-grid">
+      <label>OpenRouter <input id="st-key-openrouter" type="password" placeholder="sk-or-… (leave blank to keep)" /></label>
+      <label>OpenAI <input id="st-key-openai" type="password" placeholder="sk-… (leave blank to keep)" /></label>
+    </div>
+    <div class="set-note">Ollama and llama.cpp run locally and need no key. Keys save to your user config, never the project.</div>
+
+    <h3>Integrations</h3>
+    <div class="set-grid">
+      <label>GitHub token
+        <input id="st-token-github" type="password" placeholder="ghp_… (leave blank to keep)" autocomplete="new-password" />
+      </label>
+      <label>Railway token
+        <input id="st-token-railway" type="password" placeholder="(leave blank to keep)" autocomplete="new-password" />
+      </label>
+    </div>
+    <div class="set-note">Tokens are stored locally in your user config and are never shown back or saved in the project.</div>
+
+    <h3>Voice</h3>
+    <div class="set-grid">
+      <label>Speech-to-text key (Groq — free at console.groq.com)
+        <input id="st-stt-key" type="password" placeholder="gsk_… (leave blank to keep)" />
+      </label>
+      <label>STT endpoint <input id="st-stt-url" /></label>
+      <label>TTS voice backend
+        <select id="st-tts-backend">
+          <option value="edge">Edge neural (free, natural)</option>
+          <option value="fish">Fish Audio (premium)</option>
+          <option value="sapi">Windows offline</option>
+        </select>
+      </label>
+      <label>Edge voice <input id="st-tts-edge" /></label>
+      <label>Fish Audio key <input id="st-key-fish" type="password" placeholder="(leave blank to keep)" /></label>
+      <label>Fish voice ID <input id="st-fish-voice" placeholder="(optional)" /></label>
+      <label class="set-check"><input type="checkbox" id="st-autospeak" /> Speak replies aloud</label>
+    </div>
+
+    <h3>Web Portal (mobile remote)</h3>
+    <div class="set-grid">
+      <label class="set-check"><input type="checkbox" id="st-wportal-enabled" /> Start portal when app launches</label>
+      <label>Tunnel
+        <select id="st-wportal-tunnel">
+          <option value="off">Localhost only</option>
+          <option value="cloudflared">Cloudflare quick tunnel (free, phone-accessible)</option>
+        </select>
+      </label>
+      <label>Local port <input id="st-wportal-port" type="number" min="1024" max="65535" /></label>
+      <label>cloudflared path <input id="st-wportal-cfpath" placeholder="auto-detect (leave blank)" /></label>
+      <label class="wide">Status
+        <div id="wportal-status" class="wportal-status">—</div>
+      </label>
+      <label class="wide wportal-actions">
+        <button type="button" id="wportal-toggle" class="portal-btn">Start portal</button>
+        <button type="button" id="wportal-copy" class="portal-btn hidden">Copy URL + token</button>
+      </label>
+    </div>
+
+    <h3>Permissions</h3>
+    <div class="set-grid">
+      <label>Shell commands
+        <select id="st-perm-bash"><option value="ask">ask me first</option><option value="allow">always allow</option><option value="deny">never</option></select>
+      </label>
+      <label>File writes/edits
+        <select id="st-perm-write"><option value="allow">always allow</option><option value="ask">ask me first</option><option value="deny">never</option></select>
+      </label>
+      <label>Web fetches
+        <select id="st-perm-webfetch"><option value="allow">always allow</option><option value="ask">ask me first</option><option value="deny">never</option></select>
+      </label>
+      <label>MCP tools
+        <select id="st-perm-mcp"><option value="ask">ask me first</option><option value="allow">always allow</option><option value="deny">never</option></select>
+      </label>
+    </div>
+
+    <h3>Agent Persona & Memory</h3>
+    <div class="set-grid">
+      <label class="wide">Custom Persona / Instructions
+        <textarea id="st-persona" placeholder="e.g. You are a senior software engineer who writes concise, clean code. Keep explanations minimal."></textarea>
+      </label>
+      <label class="wide">Agent Memory / Persistent facts
+        <textarea id="st-memory" placeholder="e.g. Project uses Node.js v20. Database is SQLite. Use CamelCase for files."></textarea>
+      </label>
+    </div>
+
+    <div id="settings-footer">
+      <button id="settings-save">Save</button>
+      <button id="settings-close">Close</button>
+      <span id="settings-saved"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Schedule modal -->
+<div id="sched-backdrop" class="hidden">
+  <div id="sched-modal">
+    <h2>Schedule a task</h2>
+    <div class="set-grid">
+      <label class="wide">Title
+        <input id="sched-title" placeholder="e.g. Daily research scan" />
+      </label>
+      <label class="wide">Prompt — what the agent should do
+        <textarea id="sched-prompt" rows="4" placeholder="e.g. Search for new AI papers and summarize them to my memory."></textarea>
+      </label>
+      <label>Schedule type
+        <select id="sched-type">
+          <option value="cron">Cron expression</option>
+          <option value="interval">Every N minutes</option>
+        </select>
+      </label>
+      <label id="sched-cron-wrap">Cron (5 fields)
+        <input id="sched-cron" placeholder="0 9 * * 1-5" />
+        <span class="set-note">min hour dom mon dow — */15 * * * * = every 15 min</span>
+      </label>
+      <label id="sched-interval-wrap" class="hidden">Interval (minutes)
+        <input id="sched-interval" type="number" min="1" placeholder="60" />
+      </label>
+      <label>Autonomy level
+        <select id="sched-autonomy">
+          <option value="research">Research (read-only)</option>
+          <option value="safe" selected>Safe (read+write)</option>
+          <option value="full">Full (anything)</option>
+        </select>
+      </label>
+    </div>
+    <div id="sched-footer">
+      <button id="sched-save">Add Task</button>
+      <button id="sched-cancel">Cancel</button>
+      <span id="sched-saved"></span>
+    </div>
+  </div>
+</div>
+
+<!-- Model selector modal -->
+<div id="model-backdrop" class="hidden">
+  <div id="model-modal">
+    <h2>Model &amp; Agents</h2>
+    <div class="set-note">The live catalog (OpenRouter + local models). Pick a model for the main agent, or tell the agent in conversation which model each role should use.</div>
+    <div id="model-list" class="model-list"></div>
+    <div id="agent-structure" class="agent-structure hidden"></div>
+    <div id="model-footer">
+      <button id="model-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="md.js"></script>
+<script src="diff.js"></script>
+<script src="voice.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

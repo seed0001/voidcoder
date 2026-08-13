@@ -1,0 +1,27 @@
+{
+  "name": "voidcode",
+  "version": "0.1.0",
+  "description": "VoidCode — a terminal and desktop AI agent harness with an optional SQL-backed execution context.",
+  "main": "src/index.js",
+  "bin": {
+    "voidcode": "bin/voidcode.js",
+    "voidcode-context": "bin/voidcode-context.js"
+  },
+  "scripts": {
+    "start": "node bin/voidcode.js",
+    "app": "electron app/main.js",
+    "test": "node test/harness.test.js && node test/contextDb.test.js && node test/continuation.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "Travis",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.4.11"
+  },
+  "dependencies": {
+    "msedge-tts": "^2.0.7",
+    "sql.js": "^1.14.1"
+  }
+}

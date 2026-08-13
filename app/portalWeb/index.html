@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <title>VoidCode · Portal</title>
+  <link rel="stylesheet" href="/portal/styles.css" />
+</head>
+<body>
+  <!-- login / token gate -->
+  <section id="login" class="hidden">
+    <div class="card">
+      <div class="brand">VOIDCODE</div>
+      <h1>Remote Portal</h1>
+      <p>Enter the access token shown in the desktop app (Settings → Web Portal) to take control from here.</p>
+      <input id="token-input" type="text" autocomplete="off" placeholder="paste access token" inputmode="verbatim" />
+      <button id="login-btn">Connect</button>
+      <div id="login-err" class="err hidden"></div>
+    </div>
+  </section>
+
+  <!-- app -->
+  <section id="app" class="hidden">
+    <header id="top">
+      <div class="brand-mini" id="brand-mini">VOIDCODE</div>
+      <div class="status-line" id="status-line">…</div>
+      <button id="stop-btn" class="hidden">■ Stop</button>
+    </header>
+
+    <main id="chat" aria-live="polite"></main>
+
+    <footer id="footer">
+      <div id="perm-wrap" class="hidden">
+        <div class="perm-card">
+          <div class="perm-title" id="perm-title">Permission</div>
+          <div class="perm-detail" id="perm-detail"></div>
+          <div class="perm-actions">
+            <button class="perm-y" data-a="y">Allow once</button>
+            <button class="perm-a" data-a="a">Always this session</button>
+            <button class="perm-n" data-a="n">Deny</button>
+          </div>
+        </div>
+      </div>
+      <div id="composer">
+        <textarea id="input" rows="1" placeholder="Message VoidCode…"></textarea>
+        <button id="send-btn">Send</button>
+      </div>
+      <div id="focus-btn" class="foot-link">Focus sessions —</div>
+      <div id="focus-panel" class="hidden"></div>
+    </footer>
+  </section>
+
+  <script src="/portal/app.js"></script>
+</body>
+</html>

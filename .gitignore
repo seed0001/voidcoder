@@ -1,0 +1,48 @@
+# ---- Dependencies ----
+node_modules/
+
+# ---- Local runtime state / data (never commit) ----
+.voidcode/
+.voidcode-memory.md
+SCRATCH.md
+AUDIT.md
+research_audit_log.md
+
+# ---- Secrets & keys (never commit) ----
+.env
+.env.*
+!.env.example
+config.json
+*.local
+*secret*
+*key*.json
+.vscode/secrets.json
+
+# ---- Sensitive local files ----
+top-scams-report-2026.md
+
+# ---- Build / dist output ----
+dist/
+build/
+out/
+release/
+*.exe
+*.msi
+*.AppImage
+*.dmg
+!launch.bat
+
+# ---- Logs & temp ----
+*.log
+electron-debug*.log
+sqlite-test.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# ---- editor / OS ----
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.template

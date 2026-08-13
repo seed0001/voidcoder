@@ -1,0 +1,61 @@
+{
+  "defaultModel": "openrouter-default",
+  "models": [
+    {
+      "id": "ollama-local",
+      "provider": "ollama",
+      "modelName": "llama3.2:latest",
+      "baseUrl": "http://localhost:11434/v1",
+      "costCategory": "free",
+      "capabilities": ["research", "writing", "simple-tasks"]
+    },
+    {
+      "id": "ollama-deepseek",
+      "provider": "ollama",
+      "modelName": "deepseek-coder-v2:latest",
+      "baseUrl": "http://localhost:11434/v1",
+      "costCategory": "free",
+      "capabilities": ["coding", "reasoning"]
+    },
+    {
+      "id": "ollama-qwen",
+      "provider": "ollama",
+      "modelName": "qwen2.5-coder:latest",
+      "baseUrl": "http://localhost:11434/v1",
+      "costCategory": "free",
+      "capabilities": ["coding", "reasoning", "analysis"]
+    },
+    {
+      "id": "openrouter-default",
+      "provider": "openrouter",
+      "modelName": "anthropic/claude-3.5-sonnet",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "costCategory": "paid",
+      "capabilities": ["coding", "reasoning", "planning", "research"]
+    },
+    {
+      "id": "openrouter-deepseek",
+      "provider": "openrouter",
+      "modelName": "deepseek/deepseek-chat-v3.1",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "costCategory": "paid",
+      "capabilities": ["coding", "reasoning", "analysis"]
+    },
+    {
+      "id": "openrouter-gemini",
+      "provider": "openrouter",
+      "modelName": "google/gemini-2.5-flash",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "costCategory": "paid",
+      "capabilities": ["research", "writing", "coding", "long-context"]
+    },
+    {
+      "id": "openrouter-opus",
+      "provider": "openrouter",
+      "modelName": "anthropic/claude-opus-4.1",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "costCategory": "paid",
+      "capabilities": ["coding", "reasoning", "planning", "architecture"]
+    }
+  ]
+}
