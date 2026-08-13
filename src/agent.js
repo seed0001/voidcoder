@@ -505,6 +505,11 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
 
     try {
     for (let round = 0; round < maxRounds; round++) {
+      const repeatGuard = guardrails.repeatedToolCallStreak(messages);
+      const repeatStopAt = this.cfg.guardrails?.repeatedToolCallStopAt || 4;
+      if (repeatGuard.count >= repeatStopAt) {
+        throw new Error(`Repeated tool-call loop stopped safely: ${repeatGuard.name || 'the same tool'} was called ${repeatGuard.count} consecutive times with identical arguments. The tool may not have fired or its response may be missing/unchanged.`);
+      }
       let result;
       let useTools = tools;
 
@@ -527,7 +532,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       for (let attempt = 0; ; attempt++) {
         try {
           const messagesToSend = [...messages];
-          if (messagesToSend.length > 0 && messagesToSend[messagesToSend.length - 1].role === 'tool') {
+          if (messagesToSend.length > 0) {
             const additions = guardrails.intercept({
               messages,
               kind,

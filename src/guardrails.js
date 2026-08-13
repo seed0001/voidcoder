@@ -199,7 +199,73 @@ function categoryApplies(category, kind) {
   return category === kind;
 }
 
-// ---- the interceptor --------------------------------------------------------
+// ---- repeated tool-call detection -------------------------------------------
+
+// Web search/fetch calls are intentionally repeatable while exploring sources.
+// Keep this conservative: local file, shell, edit, memory, and control tools
+// remain visible to the detector.
+const REPEATABLE_TOOL_RE = /^(?:websearch|web_search|webfetch|web_fetch|search_(?:repos|packages|news)|rss_fetch)$/i;
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((out, key) => {
+      out[key] = stableValue(value[key]);
+      return out;
+    }, {});
+  }
+  return value;
+}
+
+function normalizeToolArguments(raw) {
+  if (raw && typeof raw === 'object') return stableValue(raw);
+  const text = String(raw || '').trim();
+  if (!text) return {};
+  try { return stableValue(JSON.parse(text)); } catch { return text; }
+}
+
+function toolCallSignature(call) {
+  const name = call?.function?.name || call?.name || '';
+  const rawArgs = call?.function?.arguments ?? call?.arguments ?? {};
+  return JSON.stringify({ name, arguments: normalizeToolArguments(rawArgs) });
+}
+
+// Return the trailing run of identical non-web calls. This intentionally
+// counts emitted calls even when their role:tool response is missing: that is
+// one of the failure modes this guard is meant to catch. A plain assistant/user
+// turn resets the run; tool-result messages do not.
+function repeatedToolCallStreak(messages) {
+  if (!Array.isArray(messages) || !messages.length) return { count: 0, signature: null, name: null, args: null };
+  let lastSignature = null;
+  let lastCall = null;
+  let count = 0;
+  for (const message of messages) {
+    if (!message) continue;
+    if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+      for (const call of message.tool_calls) {
+        const name = call?.function?.name || call?.name || '';
+        if (REPEATABLE_TOOL_RE.test(name)) continue;
+        const signature = toolCallSignature(call);
+        if (signature === lastSignature) count++;
+        else { lastSignature = signature; lastCall = call; count = 1; }
+      }
+    } else if (message.role === 'assistant' || message.role === 'user') {
+      lastSignature = null;
+      lastCall = null;
+      count = 0;
+    }
+  }
+  return {
+    count,
+    signature: lastSignature,
+    name: lastCall?.function?.name || lastCall?.name || null,
+    args: lastCall ? normalizeToolArguments(lastCall?.function?.arguments ?? lastCall?.arguments ?? {}) : null,
+  };
+}
+
+const REPEATED_TOOL_WARNING = `[System Rule - Repeated Tool Call] The same non-web tool call has completed repeatedly with identical arguments. This may mean the tool did not actually fire, its response is missing from the conversation, or the arguments are not making progress. Verify the latest tool result is present and usable before acting. Do NOT blindly issue the identical call again: change the arguments, choose another approach, or explain that you are blocked.`;
+
+const REPEATED_TOOL_STOP = `[System Rule - Repeated Tool Call Stop] The identical non-web tool call has repeated beyond the safe limit. Stop issuing that call. Report whether the tool result was missing, unusable, or unchanged, and ask for clarification if necessary.`;
 
 const REALITY_CHECK = `[System Rule - Reality Check] The previous tool returned no useful result. You are a real software agent running locally on the user's machine. Do NOT invent fictional company employees, departments, internal wikis, IRC/helpdesk chats, or "reach out to [Name]/colleagues/teammates" workflows that do not exist. Do NOT search local project files (glob/grep) or model registries (list_models) to fill a gap about the outside world. Refine the search query with different English wording once or twice, or say plainly what could not be determined.`;
 
@@ -287,7 +353,15 @@ function intercept({ messages, kind = 'main', context = {} }) {
 
   const additions = [];
   const last = messages && messages[messages.length - 1];
-  if (!last || last.role !== 'tool') return additions;
+  const repeated = repeatedToolCallStreak(messages);
+  const repeatWarningAt = g.repeatedToolCallWarningAt || 3;
+  const repeatStopAt = g.repeatedToolCallStopAt || 4;
+  if (!last || last.role !== 'tool') {
+    if (repeated.count >= repeatStopAt) additions.push(REPEATED_TOOL_STOP);
+    else if (repeated.count >= repeatWarningAt) additions.push(REPEATED_TOOL_WARNING);
+    if (additions.length) additions.push(NEVER_NARRATE);
+    return dedupe(additions);
+  }
 
   const content = String(last.content || '');
   const outcome = toolOutcome(content);
@@ -301,11 +375,19 @@ function intercept({ messages, kind = 'main', context = {} }) {
   // received output" nudge (which caused the model to invent tool output).
   additions.push(goalAnchorRule(lastToolName(messages), outcome, content));
 
-  // 2) Foreign-script source material → English lock.
+  // 2) Repeated identical non-web calls are a mechanical warning/stop signal.
+  // This is based on actual assistant/tool pairs, not on the model's narration.
+  if (repeated.count >= repeatStopAt) {
+    additions.push(REPEATED_TOOL_STOP);
+  } else if (repeated.count >= repeatWarningAt) {
+    additions.push(REPEATED_TOOL_WARNING);
+  }
+
+  // 3) Foreign-script source material → English lock.
   const foreign = detectForeignScript(content);
   if (foreign) additions.push(ENGLISH_LOCK);
 
-  // 3) Error / 0-hit handling, scaled by how many times the model has lost.
+  // 4) Error / 0-hit handling, scaled by how many times the model has lost.
   if (outcome === 'zero' || outcome === 'error') {
     if (kind === 'focus' && streak >= maxStreak) {
       additions.push(STOP_AND_REPORT);
@@ -367,6 +449,8 @@ const STATIC_LEAK_STRINGS = [
   'Either retry with corrected arguments, switch tool or approach, or state plainly that you could not get the information.',
   'Read it as supporting material; extract only facts relevant to the task and continue. Keep your response concise.',
   'Make NO further tool calls. Call focus_complete now with your final report.',
+  'The same non-web tool call has completed repeatedly with identical arguments. This may mean the tool did not actually fire, its response is missing from the conversation, or the arguments are not making progress. Verify the latest tool result is present and usable before acting. Do NOT blindly issue the identical call again: change the arguments, choose another approach, or explain that you are blocked.',
+  'The identical non-web tool call has repeated beyond the safe limit. Stop issuing that call. Report whether the tool result was missing, unusable, or unchanged, and ask for clarification if necessary.',
 ];
 
 const DYNAMIC_LEAK_PATTERNS = [
@@ -379,6 +463,8 @@ const DYNAMIC_LEAK_PATTERNS = [
   /\[System Rule - Digest\] The tool output is long \(\d+ chars\)\.\s*/g,
   // Focus tool-call cap — dynamic counts.
   /\[System Rule - Tool Cap\] You have made \d+ tool calls \(session allows \d+\)\.\s*/g,
+  /\[System Rule - Repeated Tool Call\][\s\S]*?explain that you are blocked\.\s*/g,
+  /\[System Rule - Repeated Tool Call Stop\][\s\S]*?if necessary\.\s*/g,
   // Learning-memory injection block header + bullet lines.
   /\[From saved behavioral memory[^\]]*\](?:\n- [^\n]*)*/g,
   // Prose tool-intro recovery nudge.
@@ -469,6 +555,8 @@ module.exports = {
   setStorePath,
   resetStorePath,
   lastToolName,
+  repeatedToolCallStreak,
+  toolCallSignature,
   leadToolName,
   goalAnchorRule,
   stripLeakedSystemTags,

@@ -70,6 +70,8 @@ const DEFAULTS = {
     // Universal turn interceptor + behavioral learning memory (src/guardrails.js).
     enabled: true,           // set false to disable all dynamic turn-time rules
     maxZeroHitStreak: 3,     // consecutive empty/error tool results before a forced stop/pause rule
+    repeatedToolCallWarningAt: 3, // identical non-web tool calls before a diagnostic warning
+    repeatedToolCallStopAt: 4, // identical non-web tool calls before a mechanical stop
     maxToolCalls: 25,        // focus subagents are soft-capped here and forced to report
     researchMaxToolCalls: 250, // research-mode sweeps are capped much higher (time, not calls, ends them)
     maxLearnings: 30,        // entries kept in ~/.voidcode/learnings.md (newest win; dedup on trigger)

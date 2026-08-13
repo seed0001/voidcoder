@@ -951,6 +951,57 @@ async function main() {
       assert.strictEqual(out.length, 0);
     });
 
+    check('repeated tool signatures normalize argument order and count only consecutive completed calls', () => {
+      const call = (id, args) => ({ role: 'assistant', content: null, tool_calls: [{ id, function: { name: 'read', arguments: JSON.stringify(args) } }] });
+      const msgs = [
+        { role: 'user', content: 'inspect file' },
+        call('r1', { filePath: 'src/agent.js', offset: 1, limit: 20 }),
+        { role: 'tool', tool_call_id: 'r1', content: 'same file content' },
+        call('r2', { limit: 20, filePath: 'src/agent.js', offset: 1 }),
+        { role: 'tool', tool_call_id: 'r2', content: 'same file content' },
+        call('r3', { filePath: 'src/agent.js', offset: 1, limit: 20 }),
+        { role: 'tool', tool_call_id: 'r3', content: 'same file content' },
+      ];
+      const streak = guardrails.repeatedToolCallStreak(msgs);
+      assert.strictEqual(streak.count, 3);
+      assert.strictEqual(streak.name, 'read');
+      assert.strictEqual(guardrails.repeatedToolCallStreak([...msgs, { role: 'assistant', content: 'I will change approach.' }]).count, 0);
+    });
+
+    check('repeated web searches are excluded but local file searches are detected', () => {
+      const call = (id, name) => ({ role: 'assistant', content: null, tool_calls: [{ id, function: { name, arguments: '{"query":"same"}' } }] });
+      const web = [
+        call('w1', 'websearch'), { role: 'tool', tool_call_id: 'w1', content: 'results' },
+        call('w2', 'search_news'), { role: 'tool', tool_call_id: 'w2', content: 'results' },
+        call('w3', 'webfetch'), { role: 'tool', tool_call_id: 'w3', content: 'page' },
+      ];
+      assert.strictEqual(guardrails.repeatedToolCallStreak(web).count, 0, 'web calls are intentionally repeatable');
+      const local = [
+        call('g1', 'grep'), { role: 'tool', tool_call_id: 'g1', content: 'match' },
+        call('g2', 'grep'), { role: 'tool', tool_call_id: 'g2', content: 'match' },
+        call('g3', 'grep'), { role: 'tool', tool_call_id: 'g3', content: 'match' },
+      ];
+      assert.strictEqual(guardrails.repeatedToolCallStreak(local).count, 3);
+    });
+
+    check('intercept warns when repeated calls have no tool response at all', () => {
+      const msgs = [{ role: 'user', content: 'find files' }];
+      for (let i = 1; i <= 3; i++) msgs.push({ role: 'assistant', content: null, tool_calls: [{ id: `missing${i}`, function: { name: 'glob', arguments: '{"pattern":"src/**/*.js"}' } }] });
+      const out = guardrails.intercept({ messages: msgs, kind: 'main', context: { cfg: gCfg } }).join('\\n');
+      assert(out.includes('[System Rule - Repeated Tool Call]'));
+    });
+
+    check('intercept warns at three identical non-web calls and stops at four', () => {
+      const call = (id) => ({ role: 'assistant', content: null, tool_calls: [{ id, function: { name: 'glob', arguments: '{"pattern":"src/**/*.js"}' } }] });
+      const msgs = [{ role: 'user', content: 'find files' }];
+      for (let i = 1; i <= 3; i++) { msgs.push(call(`g${i}`), { role: 'tool', tool_call_id: `g${i}`, content: 'same files' }); }
+      const warning = guardrails.intercept({ messages: msgs, kind: 'main', context: { cfg: gCfg } }).join('\n');
+      assert(warning.includes('[System Rule - Repeated Tool Call]'));
+      msgs.push(call('g4'), { role: 'tool', tool_call_id: 'g4', content: 'same files' });
+      const stop = guardrails.intercept({ messages: msgs, kind: 'main', context: { cfg: gCfg } }).join('\n');
+      assert(stop.includes('[System Rule - Repeated Tool Call Stop]'));
+    });
+
     check('intercept forces a stop after a 3x empty-search streak in focus mode', () => {
       const out = guardrails.intercept({
         messages: [

@@ -343,7 +343,7 @@ class FocusSession {
         const messagesToSend = [...this.messages];
         const cfgG = (this.agentRefs.cfg || {}).guardrails || {};
 
-        if (messagesToSend.length > 0 && messagesToSend[messagesToSend.length - 1].role === 'tool') {
+        if (messagesToSend.length > 0) {
           const additions = guardrails.intercept({
             messages: this.messages,
             kind: 'focus',
@@ -373,6 +373,15 @@ class FocusSession {
         if (this._pendingContinuation) {
           messagesToSend.push({ role: 'system', content: this._pendingContinuation });
           this._pendingContinuation = null;
+        }
+
+        const repeated = guardrails.repeatedToolCallStreak(this.messages);
+        const repeatedStopAt = cfgG.repeatedToolCallStopAt || 4;
+        if (repeated.count >= repeatedStopAt) {
+          const reason = `repeated tool-call loop stopped safely: ${repeated.name || 'the same tool'} was called ${repeated.count} consecutive times with identical arguments; the tool may not have fired or its response may be missing/unchanged.`;
+          this.addLog(reason);
+          this.finish(`[${reason}]`, 'error');
+          break;
         }
 
         // Mechanical loop-breaker: hard tool-call cap. Research sweeps are
