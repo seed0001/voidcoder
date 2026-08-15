@@ -27,6 +27,7 @@ const DEFAULTS = {
     ollama: { baseUrl: 'http://localhost:11434/v1', apiKey: '', apiKeyEnv: '', contextTokens: 16384 },
     llamacpp: { baseUrl: 'http://localhost:8080/v1', apiKey: '', apiKeyEnv: '', contextTokens: 16384 },
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', apiKeyEnv: 'OPENAI_API_KEY' },
+    fairrouter: { baseUrl: 'https://fairrouter.ai/v1', apiKey: '', apiKeyEnv: 'FAIRROUTER_API_KEY' },
   },
   integrations: {
     githubToken: '',
@@ -99,6 +100,11 @@ const DEFAULTS = {
     },
   },
   appState: { lastCwd: '' }, // desktop app: last working folder
+  // Desktop appearance (renderer only). Unknown theme ids fall back to 'void'.
+  ui: {
+    theme: 'void',   // void | ember | mono | violet
+    pacer: true,     // walk the bottom avatar while the agent is thinking
+  },
   // Web portal (app/portal.js): mobile remote control via a token-auth HTTP
   // panel, optionally exposed through a Cloudflare quick tunnel (cloudflared).
   webPortal: {
@@ -106,6 +112,52 @@ const DEFAULTS = {
     tunnel: 'off',        // off | cloudflared
     port: 8777,           // localhost bind port (never exposed directly)
     cloudflaredPath: '',  // optional explicit path to cloudflared.exe
+  },
+  // Discord integration (src/discord/*). Wholly OPTIONAL and additive — the
+  // daemon (bin/voidcode-discord.js) simply exits if discord.enabled is false,
+  // and nothing here affects the terminal/desktop/portal paths.
+  discord: {
+    enabled: false,
+    tokenEnv: 'DISCORD_BOT_TOKEN', // env var holding the bot token (mirrors providers[].apiKeyEnv)
+    token: '', // optional inline override; prefer tokenEnv — never commit a real token here
+    // The ONLY Discord user id that can manage contacts/tiers/portfolio. Set
+    // this by hand here — it is never writable via any Discord command or LLM tool.
+    ownerId: '',
+    projectPath: '',               // cwd interactive chat sessions run against; '' = daemon's own cwd
+    guildIds: [],                  // servers the bot operates in; [] = DMs only
+    allowedChannelIds: [],         // designated channels to listen in within those guilds
+    reportChannelId: '',           // scheduled-task/focus/portfolio notifications land here
+    permissionTimeoutSec: 120,     // owner permission prompt (reaction/reply) auto-denies after this
+    sessionIdleEvictMinutes: 60,   // idle per-contact Agent/Session instances save+evict after this
+    // Per-tier overrides applied to a cloned cfg before constructing that
+    // contact's Permissions. 'owner' always uses the real cfg unmodified.
+    // Add/rename tiers here — nothing else hardcodes tier names.
+    // rank orders tiers low-to-high for "minimum tier allowed" checks (e.g.
+    // voice.minTierAllowed) — explicit, so it doesn't depend on object key
+    // declaration order if a user reorders/edits this in their config file.
+    tiers: {
+      guest: {
+        rank: 0,
+        permissions: { bash: 'deny', write: 'deny', edit: 'deny', webfetch: 'deny' },
+        autonomyLevel: 'off', canManageContacts: false, canManagePortfolio: false, canUseVoice: false, toolsEnabled: false,
+      },
+      trusted: {
+        rank: 1,
+        permissions: { bash: 'deny', write: 'deny', edit: 'deny', webfetch: 'allow' },
+        autonomyLevel: 'off', canManageContacts: false, canManagePortfolio: false, canUseVoice: true, toolsEnabled: true,
+      },
+      owner: { rank: 2, useRealConfig: true, canManageContacts: true, canManagePortfolio: true, canUseVoice: true, toolsEnabled: true },
+    },
+    voice: {
+      enabled: false,
+      opusLib: 'opusscript',       // pure-JS, no native build; '@discordjs/opus' is a faster native alternative
+      minTierAllowed: 'trusted',
+    },
+    portfolio: {
+      enabled: false,               // additive/no-op — false means zero behavior change
+      defaultCadenceMinutes: 720,
+      defaultAutonomyLevel: 'safe', // sweeps always run at this level regardless of the owner's real cfg
+    },
   },
   // Digital-organism mode (src/organism.js). Wholly OPTIONAL and additive —
   // when disabled (the default) every integration point is a no-op and nothing
@@ -290,4 +342,4 @@ function loadProjectInstructions(cwd = process.cwd()) {
   return parts;
 }
 
-module.exports = { load, saveGlobal, resolveProvider, loadProjectInstructions, GLOBAL_DIR, DEFAULTS, ModelRegistry };
+module.exports = { load, saveGlobal, resolveProvider, loadProjectInstructions, GLOBAL_DIR, DEFAULTS, ModelRegistry, deepMerge };

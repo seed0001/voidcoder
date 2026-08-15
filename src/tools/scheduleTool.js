@@ -61,7 +61,8 @@ function makeExecutors(/* ctx unused */) {
             const status = t.enabled ? '●' : '○';
             const when = t.cron || `every ${t.interval}min`;
             const last = t.lastRun ? ` last: ${t.lastRun.slice(0, 16)}` : '';
-            return `  ${status} ${t.id.slice(0, 8)}  ${t.title}  (${when})${last}`;
+            const src = t.source && t.source !== 'user' ? ` [${t.source}]` : '';
+            return `  ${status} ${t.id.slice(0, 8)}  ${t.title}  (${when})${last}${src}`;
           });
           return `Scheduled tasks (${tasks.length}):\n${lines.join('\n')}`;
         }
@@ -100,6 +101,7 @@ function makeExecutors(/* ctx unused */) {
             `  prompt:   ${task.prompt.slice(0, 200)}`,
             `  schedule: ${task.cron || `every ${task.interval} minutes`}`,
             `  autonomy: ${task.autonomyLevel || 'safe'}`,
+            `  source:   ${task.source || 'user'}${task.projectPath ? ` (project: ${task.projectPath})` : ''}`,
             `  created:  ${task.createdAt ? new Date(task.createdAt).toLocaleString() : 'unknown'}`,
             `  last run: ${task.lastRun ? new Date(task.lastRun).toLocaleString() : 'never'}`,
             `  next run: ${task.nextRun ? new Date(task.nextRun).toLocaleString() : 'never (check schedule)'}`,

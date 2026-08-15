@@ -124,7 +124,7 @@ function nextRunInterval(intervalMins, after = new Date()) {
   return new Date(after.getTime() + intervalMins * 60 * 1000);
 }
 
-function addTask({ title, prompt, cron, interval, autonomyLevel = 'safe', enabled = true }) {
+function addTask({ title, prompt, cron, interval, autonomyLevel = 'safe', enabled = true, source = 'user', projectPath = '' }) {
   const data = load();
   const id = newId();
   const now = new Date();
@@ -146,6 +146,13 @@ function addTask({ title, prompt, cron, interval, autonomyLevel = 'safe', enable
     interval: interval || 0,
     autonomyLevel,
     enabled,
+    // 'user' = created via the schedule tool by a person; 'portfolio-sweep' =
+    // auto-managed by src/discord/portfolio.js's reconcileScheduledSweeps().
+    // projectPath, when set, is the cwd this task's turn should run against —
+    // omitted (default '') preserves prior behavior (whatever cwd the calling
+    // process is bound to).
+    source,
+    projectPath,
     createdAt: now.toISOString(),
     lastRun: null,
     lastResult: null,
@@ -195,6 +202,10 @@ function listTasks() {
   return data.tasks;
 }
 
+function listTasksBySource(source) {
+  return load().tasks.filter((t) => (t.source || 'user') === source);
+}
+
 function getDueTasks() {
   const now = new Date();
   return load().tasks.filter((t) => t.enabled && t.nextRun && new Date(t.nextRun) <= now);
@@ -216,6 +227,6 @@ function markRan(id, result) {
 }
 
 module.exports = {
-  load, save, addTask, updateTask, removeTask, listTasks, getDueTasks, markRan,
+  load, save, addTask, updateTask, removeTask, listTasks, listTasksBySource, getDueTasks, markRan,
   validateCron, cronMatches, nextRun, nextRunInterval,
 };

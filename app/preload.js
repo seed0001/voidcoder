@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('vc', {
   getAgentStructure: () => ipcRenderer.invoke('agent:structure'),
 
   onDelta: on('agent:delta'),
+  onReasoningDelta: on('agent:reasoningDelta'),
   onToolStart: on('agent:toolStart'),
   onToolEnd: on('agent:toolEnd'),
   onFileChange: on('agent:fileChange'),

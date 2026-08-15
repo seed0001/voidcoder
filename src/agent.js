@@ -554,6 +554,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
             useTools ? useTools.apiDefs : null,
             {
               onDelta: quiet ? null : (t) => this.events.onDelta?.(t),
+              onReasoningDelta: quiet ? null : (t) => this.events.onReasoningDelta?.(t),
               signal: abort.signal,
             });
           break;

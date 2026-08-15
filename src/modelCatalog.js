@@ -75,13 +75,14 @@ function classifyTier(promptPrice, completionPrice, isLocal) {
 }
 
 async function discoverModels(cfg, cwd = process.cwd()) {
-  const key = [
-    cwd,
-    cfg.providers?.openrouter?.baseUrl,
-    cfg.providers?.ollama?.baseUrl,
-    cfg.providers?.llamacpp?.baseUrl,
-    cfg.providers?.openrouter?.apiKeyEnv || '',
-  ].join('|');
+  // Signature over every configured provider (baseUrl + whether a key is set)
+  // so adding a provider or pasting in a key busts the cache, not just the
+  // three hardcoded ones below.
+  const providerSig = Object.entries(cfg.providers || {})
+    .map(([name, p]) => `${name}:${p?.baseUrl || ''}:${p?.apiKey ? '1' : '0'}`)
+    .sort()
+    .join(',');
+  const key = [cwd, providerSig].join('|');
   const now = Date.now();
   if (cache.key === key && cache.ts && now - cache.ts < CACHE_TTL) return cache.models;
 
@@ -144,6 +145,31 @@ async function discoverModels(cfg, cwd = process.cwd()) {
     const name = String(m.id);
     add({ id: `llamacpp/${name}`, provider: 'llamacpp', modelName: name, baseUrl: lcBase + '/v1', costCategory: 'free', live: true });
   });
+
+  // 5) Any other configured OpenAI-compatible provider (a hosted router like
+  // FairRouter, a self-hosted proxy, etc.) — query its /models endpoint the
+  // same way. Nothing here is provider-specific: any entry added under
+  // cfg.providers with a baseUrl gets discovered automatically.
+  const KNOWN_PROVIDERS = new Set(['openrouter', 'ollama', 'llamacpp']);
+  for (const [name, p] of Object.entries(cfg.providers || {})) {
+    if (KNOWN_PROVIDERS.has(name) || !p?.baseUrl) continue;
+    const base = p.baseUrl.replace(/\/+$/, '');
+    const apiKey = p.apiKey || (process.env[p.apiKeyEnv || ''] || '');
+    const list = await fetchJson(base + '/models', apiKey ? { headers: { Authorization: `Bearer ${apiKey}` } } : {}, 5000);
+    (list?.data || []).forEach((m) => {
+      const modelName = String(m.id || m.name || '');
+      if (!modelName) return;
+      add({
+        id: `${name}/${modelName}`,
+        provider: name,
+        modelName,
+        baseUrl: p.baseUrl,
+        costCategory: 'paid',
+        contextTokens: Number(m.context_length || m.context_window) || 0,
+        live: true,
+      });
+    });
+  }
 
   const models = Array.from(out.values());
   cache = { key, ts: Date.now(), models };

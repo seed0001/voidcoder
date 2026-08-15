@@ -10,6 +10,10 @@ node_modules/
 SCRATCH.md
 AUDIT.md
 research_audit_log.md
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 
 # ---- Secrets & keys (never commit) ----
 .env
@@ -20,6 +24,7 @@ config.json
 *secret*
 *key*.json
 .vscode/secrets.json
+discord-sessions.json
 
 # ---- Sensitive local files ----
 top-scams-report-2026.md
@@ -29,6 +34,7 @@ dist/
 build/
 out/
 release/
+coverage/
 *.exe
 *.msi
 *.AppImage
@@ -41,11 +47,16 @@ electron-debug*.log
 sqlite-test.log
 .DS_Store
 Thumbs.db
+desktop.ini
 *.tmp
 *.swp
+*.bak
 
-# ---- editor / OS ----
+# ---- editor / OS / agent scratch ----
 .idea/
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json.template
+.claude/
+.cursor/
+.trae/

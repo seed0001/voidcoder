@@ -118,9 +118,19 @@ async function main() {
   // ---- render events ----
   const md = new ui.MdStream();
   let streamedThisTurn = false;
+  let reasoningStreamedThisTurn = false;
 
   const events = {
+    onReasoningDelta: (t) => {
+      if (!reasoningStreamedThisTurn) {
+        spinner.stop();
+        process.stdout.write(`\n${c.muted('◇ thinking…')}\n`);
+        reasoningStreamedThisTurn = true;
+      }
+      process.stdout.write(c.muted(t));
+    },
     onDelta: (t) => {
+      if (reasoningStreamedThisTurn && !streamedThisTurn) process.stdout.write('\n\n');
       if (!streamedThisTurn) { spinner.stop(); process.stdout.write('\n'); streamedThisTurn = true; }
       md.push(t);
     },
@@ -230,6 +240,7 @@ async function main() {
   const runTurn = async (text, { autonomous = false } = {}) => {
     generating = true;
     streamedThisTurn = false;
+    reasoningStreamedThisTurn = false;
     const started = Date.now();
     spinner.start('thinking');
     try {

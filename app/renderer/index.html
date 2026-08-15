@@ -34,6 +34,20 @@
 
     <main id="chat-col">
       <div id="chat"></div>
+      <div id="pacer" class="hidden" aria-hidden="true">
+        <div id="pacer-floor"></div>
+        <div id="pacer-dude" title="thinking">
+          <svg viewBox="0 0 18 28" width="18" height="28" aria-hidden="true">
+            <circle class="pd-head" cx="9" cy="5.5" r="3.2"/>
+            <rect class="pd-body" x="6.2" y="9" width="5.6" height="8" rx="1.4"/>
+            <rect class="pd-arm" x="4.1" y="10.2" width="2" height="6.2" rx="1"/>
+            <rect class="pd-arm pd-arm-r" x="11.9" y="10.2" width="2" height="6.2" rx="1"/>
+            <rect class="pd-leg pd-leg-l" x="6.4" y="17.2" width="2.1" height="8.4" rx="1"/>
+            <rect class="pd-leg pd-leg-r" x="9.5" y="17.2" width="2.1" height="8.4" rx="1"/>
+          </svg>
+        </div>
+        <span class="sr-only">Thinking</span>
+      </div>
       <div id="composer">
         <div id="composer-status"></div>
         <div id="composer-row">
@@ -161,6 +175,32 @@
         <select id="st-perm-mcp"><option value="ask">ask me first</option><option value="allow">always allow</option><option value="deny">never</option></select>
       </label>
     </div>
+
+    <h3>Appearance</h3>
+    <div class="set-grid">
+      <label class="wide">Theme
+        <div id="theme-swatches" class="theme-swatches" role="radiogroup" aria-label="Color theme">
+          <button type="button" class="theme-swatch" data-theme="void" title="Void cyan">
+            <span class="sw-preview" data-preview="void"></span>
+            <span>Void</span>
+          </button>
+          <button type="button" class="theme-swatch" data-theme="ember" title="Ember copper">
+            <span class="sw-preview" data-preview="ember"></span>
+            <span>Ember</span>
+          </button>
+          <button type="button" class="theme-swatch" data-theme="mono" title="Refined mono">
+            <span class="sw-preview" data-preview="mono"></span>
+            <span>Mono</span>
+          </button>
+          <button type="button" class="theme-swatch" data-theme="violet" title="Signal violet">
+            <span class="sw-preview" data-preview="violet"></span>
+            <span>Violet</span>
+          </button>
+        </div>
+      </label>
+      <label class="set-check"><input type="checkbox" id="st-pacer" /> Pace across the bottom while thinking</label>
+    </div>
+    <div class="set-note">Themes only change the desktop look. The walker shows up while a reply is in progress.</div>
 
     <h3>Agent Persona & Memory</h3>
     <div class="set-grid">

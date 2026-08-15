@@ -7,10 +7,15 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 let snap = null;              // latest state snapshot from main
 let generating = false;
 let speakEnabled = true;
+const THEMES = ['void', 'ember', 'mono', 'violet'];
+let uiTheme = 'void';
+let pacerOn = true;
 
 // streaming state
 let streamEl = null;          // current assistant markdown block
 let streamText = '';
+let reasoningEl = null;       // current reasoning/thinking block
+let reasoningText = '';
 let renderPending = false;
 
 // TTS sentence streaming state
@@ -141,7 +146,15 @@ function note(text) {
   scrollChat();
 }
 
+function finalizeReasoning() {
+  if (reasoningEl && !reasoningText.trim()) reasoningEl.remove();
+  else if (reasoningEl) reasoningEl.classList.add('collapsed');
+  reasoningEl = null;
+  reasoningText = '';
+}
+
 function finalizeStream() {
+  finalizeReasoning();
   if (streamEl && !streamText.trim()) streamEl.remove();
   streamEl = null;
   streamText = '';
@@ -154,6 +167,30 @@ function ensureStreamEl() {
     chatEl().appendChild(streamEl);
   }
   return streamEl;
+}
+
+function ensureReasoningEl() {
+  if (!reasoningEl) {
+    const el = document.createElement('div');
+    el.className = 'msg-reasoning';
+    el.addEventListener('click', () => el.classList.toggle('collapsed'));
+    chatEl().appendChild(el);
+    reasoningEl = el;
+  }
+  return reasoningEl;
+}
+
+let reasoningRenderPending = false;
+function renderReasoningStream() {
+  if (reasoningRenderPending) return;
+  reasoningRenderPending = true;
+  requestAnimationFrame(() => {
+    reasoningRenderPending = false;
+    if (reasoningEl) {
+      reasoningEl.textContent = reasoningText;
+      scrollChat();
+    }
+  });
 }
 
 function renderStream() {
@@ -203,6 +240,7 @@ window.vc.onTurnStart(() => {
   $('#send-btn').classList.add('hidden');
   if (!voice.speaking && !voice.handsFree) setOrb('thinking');
   else $('#orb').className = 'thinking';
+  setPacer(true);
 });
 
 window.vc.onTurnEnd(() => {
@@ -212,9 +250,17 @@ window.vc.onTurnEnd(() => {
   ttsFlush();
   refreshReview();
   if (!voice.speaking) setOrb(voice.handsFree ? 'listening' : 'idle');
+  setPacer(false);
+});
+
+window.vc.onReasoningDelta((t) => {
+  ensureReasoningEl();
+  reasoningText += t;
+  renderReasoningStream();
 });
 
 window.vc.onDelta((t) => {
+  finalizeReasoning();
   ensureStreamEl();
   streamText += t;
   renderStream();
@@ -545,8 +591,35 @@ async function saveSchedTask() {
 
 // ============================================================ settings modal
 
+function applyTheme(name) {
+  uiTheme = THEMES.includes(name) ? name : 'void';
+  document.documentElement.setAttribute('data-theme', uiTheme);
+  $$('.theme-swatch').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.theme === uiTheme);
+    btn.setAttribute('aria-checked', btn.dataset.theme === uiTheme ? 'true' : 'false');
+  });
+}
+
+function setPacer(thinking) {
+  const el = $('#pacer');
+  if (!el) return;
+  const show = !!(thinking && pacerOn);
+  el.classList.toggle('hidden', !show);
+  el.classList.toggle('visible', show);
+  el.setAttribute('aria-hidden', show ? 'false' : 'true');
+}
+
+function applyUi(st) {
+  const ui = (st && st.ui) || {};
+  applyTheme(ui.theme || 'void');
+  pacerOn = ui.pacer !== false;
+  if ($('#st-pacer')) $('#st-pacer').checked = pacerOn;
+  if (!generating) setPacer(false);
+}
+
 function openSettings() {
   const st = snap.settings;
+  applyUi(st);
   $('#settings-path').textContent = `Saved to your user config · keys are stored locally and never shown back`;
   $('#st-model').value = `${st.provider}/${st.model}`;
   $('#st-stt-url').value = st.voice.stt.baseUrl;
@@ -596,6 +669,10 @@ async function saveSettings() {
     },
     persona: $('#st-persona').value.trim(),
     memory: $('#st-memory').value.trim(),
+    ui: {
+      theme: uiTheme,
+      pacer: $('#st-pacer') ? $('#st-pacer').checked : pacerOn,
+    },
     webPortal: {
       enabled: $('#st-wportal-enabled').checked,
       tunnel: $('#st-wportal-tunnel').value,
@@ -628,6 +705,7 @@ async function saveSettings() {
   updateModelName();
   speakEnabled = snap.settings.voice.autoSpeak;
   $('#speak-btn').classList.toggle('on', speakEnabled);
+  applyUi(snap.settings);
   statusIdle();
 }
 
@@ -713,6 +791,7 @@ function renderAll() {
   $('#project-name').textContent = snap.cwd;
   speakEnabled = snap.settings.voice.autoSpeak;
   $('#speak-btn').classList.toggle('on', speakEnabled);
+  applyUi(snap.settings);
   renderSessions();
   renderHistory();
   statusIdle();
@@ -798,6 +877,16 @@ function bind() {
 
   $('#settings-btn').addEventListener('click', () => { openSettings(); refreshPortalStatus(); });
   $('#settings-save').addEventListener('click', saveSettings);
+  $$('.theme-swatch').forEach((btn) => {
+    btn.setAttribute('role', 'radio');
+    btn.addEventListener('click', () => {
+      applyTheme(btn.dataset.theme);
+    });
+  });
+  $('#st-pacer')?.addEventListener('change', () => {
+    pacerOn = $('#st-pacer').checked;
+    setPacer(generating && pacerOn);
+  });
   $('#settings-close').addEventListener('click', () => $('#modal-backdrop').classList.add('hidden'));
   $('#modal-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'modal-backdrop') $('#modal-backdrop').classList.add('hidden');

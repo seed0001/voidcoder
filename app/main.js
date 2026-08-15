@@ -64,6 +64,7 @@ function send(channel, payload) {
 function agentEvents() {
   return {
     onDelta: (t) => send('agent:delta', t),
+    onReasoningDelta: (t) => send('agent:reasoningDelta', t),
     onToolStart: (name, args) => send('agent:toolStart', { name, args }),
     onToolEnd: (name, args, ok, output) => send('agent:toolEnd', { name, args, ok, output: String(output).slice(0, 4000) }),
     onFileChange: (file, before, after) => send('agent:fileChange', { file, before, after }),
@@ -189,6 +190,10 @@ function snapshot(provider) {
       model: cfg.model,
       persona: cfg.persona || '',
       memory: cfg.memory || '',
+      ui: {
+        theme: (cfg.ui && cfg.ui.theme) || 'void',
+        pacer: cfg.ui ? cfg.ui.pacer !== false : true,
+      },
       webPortal: {
         enabled: !!(cfg.webPortal && cfg.webPortal.enabled),
         tunnel: (cfg.webPortal && cfg.webPortal.tunnel) || 'off',

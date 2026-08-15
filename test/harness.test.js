@@ -140,6 +140,15 @@ check('diff detects change', () => {
   }
 }
 
+// ---------------- unit: desktop UI theme defaults ----------------
+{
+  const { DEFAULTS } = require('../src/config');
+  check('DEFAULTS.ui.theme is void', () => {
+    assert.strictEqual(DEFAULTS.ui.theme, 'void');
+    assert.strictEqual(DEFAULTS.ui.pacer, true);
+  });
+}
+
 // ---------------- e2e: agent loop against mock provider ----------------
 
 function sse(res, obj) { res.write(`data: ${JSON.stringify(obj)}\n\n`); }
