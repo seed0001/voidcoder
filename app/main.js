@@ -6,6 +6,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 
 // Fatal errors from the main process land in ~/.voidcode/electron-debug.log —
 // a windowed app has no console, so without this a startup crash is invisible.
@@ -178,6 +179,7 @@ function snapshot(provider) {
   return {
     cwd,
     home: os.homedir(),
+    projects: cfg.appState?.projects || [],
     provider: { name: provider.name, model: provider.model, hasKey: !!provider.apiKey },
     session: session ? { id: session.id, title: session.title, usage: session.usage } : null,
     projectCost: costTracker.load(cwd),
@@ -339,6 +341,47 @@ ipcMain.handle('app:chooseFolder', async () => {
 });
 
 ipcMain.handle('app:openPath', (e, p) => shell.showItemInFolder(p));
+
+// ---------------------------------------------------------------- desktop shell projects
+
+ipcMain.handle('project:add', async () => {
+  const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath: cwd });
+  if (res.canceled || !res.filePaths[0]) return null;
+  const folder = res.filePaths[0];
+  const projects = cfg.appState.projects || [];
+  if (!projects.some((p) => p.path === folder)) {
+    const n = projects.length;
+    projects.push({
+      id: crypto.randomUUID(),
+      name: path.basename(folder) || folder,
+      path: folder,
+      x: 32 + (n % 6) * 104,
+      y: 32 + Math.floor(n / 6) * 104,
+    });
+    config.saveGlobal({ appState: { projects } });
+    cfg = config.load(cwd);
+  }
+  return snapshot();
+});
+
+ipcMain.handle('project:remove', (e, id) => {
+  const projects = (cfg.appState.projects || []).filter((p) => p.id !== id);
+  config.saveGlobal({ appState: { projects } });
+  cfg = config.load(cwd);
+  return snapshot();
+});
+
+ipcMain.handle('project:move', (e, { id, x, y }) => {
+  const projects = (cfg.appState.projects || []).map((p) => (p.id === id ? { ...p, x, y } : p));
+  config.saveGlobal({ appState: { projects } });
+  cfg = config.load(cwd);
+});
+
+ipcMain.handle('project:open', async (e, id) => {
+  const proj = (cfg.appState.projects || []).find((p) => p.id === id);
+  if (!proj || !fs.existsSync(proj.path)) return snapshot();
+  return setWorkingFolder(proj.path);
+});
 
 ipcMain.handle('chat:send', (e, input) => runChat(input));
 

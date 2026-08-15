@@ -5,11 +5,14 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 
 let snap = null;              // latest state snapshot from main
+let currentView = 'desktop';  // 'desktop' | 'assistant'
 let generating = false;
 let speakEnabled = true;
 const THEMES = ['void', 'ember', 'mono', 'violet'];
 let uiTheme = 'void';
 let pacerOn = true;
+const sendQueue = [];
+let flushingQueue = false;
 
 // streaming state
 let streamEl = null;          // current assistant markdown block
@@ -41,7 +44,6 @@ const MODEL_PRESETS = [
 
 const voice = new VoiceIO({
   onUtterance: (text) => {
-    if (generating) return; // barge-in already stopped it; next utterance sends
     sendText(text);
   },
   onState: (s) => setOrb(s),
@@ -251,6 +253,7 @@ window.vc.onTurnEnd(() => {
   refreshReview();
   if (!voice.speaking) setOrb(voice.handsFree ? 'listening' : 'idle');
   setPacer(false);
+  flushSendQueue();
 });
 
 window.vc.onReasoningDelta((t) => {
@@ -361,17 +364,88 @@ window.vc.onPermAsk(({ id, toolName, detail }) => {
 
 // ============================================================ sending
 
+function queuePreview(item) {
+  const t = String(item.text || '').trim();
+  if (t) return t.length > 80 ? t.slice(0, 77) + '…' : t;
+  const n = (item.images || []).length;
+  return n ? `${n} image${n === 1 ? '' : 's'}` : '(empty)';
+}
+
+function renderSendQueue() {
+  const box = $('#send-queue');
+  if (!box) return;
+  box.innerHTML = '';
+  box.classList.toggle('hidden', sendQueue.length === 0);
+  if (!sendQueue.length) return;
+  const head = document.createElement('div');
+  head.className = 'sq-head';
+  head.textContent = sendQueue.length === 1
+    ? 'Waiting to send — I’ll take this when I’m done'
+    : `${sendQueue.length} messages waiting — I’ll take these when I’m done`;
+  box.appendChild(head);
+  sendQueue.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'sq-item';
+    const label = document.createElement('span');
+    label.className = 'sq-text';
+    label.textContent = queuePreview(item);
+    const drop = document.createElement('button');
+    drop.type = 'button';
+    drop.className = 'sq-drop';
+    drop.title = 'Discard this queued message';
+    drop.textContent = '×';
+    drop.addEventListener('click', () => {
+      sendQueue.splice(i, 1);
+      renderSendQueue();
+    });
+    row.appendChild(label);
+    row.appendChild(drop);
+    box.appendChild(row);
+  });
+}
+
+function enqueueSend(text, images) {
+  sendQueue.push({ text: String(text || '').trim(), images: Array.isArray(images) ? images.slice() : [] });
+  renderSendQueue();
+}
+
+async function flushSendQueue() {
+  if (flushingQueue || generating || !sendQueue.length) return;
+  flushingQueue = true;
+  try {
+    while (sendQueue.length && !generating) {
+      const next = sendQueue.shift();
+      renderSendQueue();
+      await sendText(next.text, next.images);
+    }
+  } finally {
+    flushingQueue = false;
+    renderSendQueue();
+  }
+}
+
 async function sendText(text, images = pendingImages) {
   text = String(text || '').trim();
   images = Array.isArray(images) ? images : [];
-  if ((!text && !images.length) || generating) return;
+  if (!text && !images.length) return;
+  // Mid-turn speech/type must wait — never drop, never re-queue a flush.
+  if (generating) {
+    enqueueSend(text, images);
+    if (images === pendingImages) {
+      pendingImages = [];
+      renderImagePreviews();
+    }
+    return;
+  }
   voice.stopSpeaking();
   spokeThisTurn = false;
   ttsBuf = ''; backtickCount = 0; inCodeBlock = false;
   const payload = { text, images };
   addUserMsg(payload);
-  pendingImages = [];
-  renderImagePreviews();
+  if (images === pendingImages) {
+    pendingImages = [];
+    renderImagePreviews();
+  }
   finalizeStream();
   const res = await window.vc.send(payload);
   finalizeStream();
@@ -786,6 +860,83 @@ document.getElementById('wportal-copy').addEventListener('click', async () => {
   copyText(lines.join('\n'));
 });
 
+// ============================================================ desktop shell
+
+function showView(view) {
+  currentView = view;
+  $('#app').dataset.view = view;
+}
+
+const FOLDER_ICON_SVG = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+
+function renderDesktop() {
+  const host = $('#desktop-icons');
+  host.innerHTML = '';
+  (snap?.projects || []).forEach((p, i) => {
+    const el = document.createElement('div');
+    el.className = 'desktop-icon';
+    el.dataset.id = p.id;
+    el.style.left = (p.x ?? (32 + (i % 6) * 104)) + 'px';
+    el.style.top = (p.y ?? (32 + Math.floor(i / 6) * 104)) + 'px';
+    el.innerHTML = `${FOLDER_ICON_SVG}<span>${escapeHtml(p.name)}</span>`;
+    bindDesktopIcon(el, p);
+    host.appendChild(el);
+  });
+}
+
+function bindDesktopIcon(el, project) {
+  let dragging = false;
+  let moved = false;
+  let startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+  el.addEventListener('pointerdown', (e) => {
+    dragging = true;
+    moved = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    origLeft = el.offsetLeft;
+    origTop = el.offsetTop;
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+      moved = true;
+      el.classList.add('dragging');
+      const host = $('#desktop-view');
+      const left = Math.max(0, Math.min(host.clientWidth - el.offsetWidth, origLeft + dx));
+      const top = Math.max(0, Math.min(host.clientHeight - el.offsetHeight, origTop + dy));
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+    }
+  });
+  el.addEventListener('pointerup', async (e) => {
+    if (!dragging) return;
+    dragging = false;
+    el.classList.remove('dragging');
+    el.releasePointerCapture(e.pointerId);
+    if (moved) {
+      await window.vc.moveProject(project.id, el.offsetLeft, el.offsetTop);
+    }
+  });
+
+  el.addEventListener('dblclick', async () => {
+    if (moved) return;
+    snap = await window.vc.openProject(project.id);
+    showView('assistant');
+    renderAll();
+  });
+
+  el.addEventListener('contextmenu', async (e) => {
+    e.preventDefault();
+    if (!confirm(`Remove "${project.name}" from the desktop?`)) return;
+    snap = await window.vc.removeProject(project.id);
+    renderDesktop();
+  });
+}
+
 function renderAll() {
   if (!snap) return;
   $('#project-name').textContent = snap.cwd;
@@ -798,6 +949,7 @@ function renderAll() {
   updateModelName();
   refreshReview();
   renderSchedule();
+  renderDesktop();
 }
 
 // ============================================================ wiring
@@ -862,6 +1014,13 @@ function bind() {
   $('#project-btn').addEventListener('click', async () => {
     const s = await window.vc.chooseFolder();
     if (s) { snap = s; renderAll(); }
+  });
+
+  $('#home-btn').addEventListener('click', () => showView('desktop'));
+
+  $('#desktop-add-btn').addEventListener('click', async () => {
+    const s = await window.vc.addProject();
+    if (s) { snap = s; renderDesktop(); }
   });
 
   $$('#right-tabs button').forEach((btn) => {
@@ -1086,6 +1245,7 @@ function setupModelSelector() {
 
 async function boot() {
   snap = await window.vc.init();
+  showView('desktop');
   bind();
   setupFocusEvents();
   setupModelSelector();

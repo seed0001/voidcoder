@@ -11,6 +11,11 @@ contextBridge.exposeInMainWorld('vc', {
   chooseFolder: () => ipcRenderer.invoke('app:chooseFolder'),
   openPath: (p) => ipcRenderer.invoke('app:openPath', p),
 
+  addProject: () => ipcRenderer.invoke('project:add'),
+  removeProject: (id) => ipcRenderer.invoke('project:remove', id),
+  moveProject: (id, x, y) => ipcRenderer.invoke('project:move', { id, x, y }),
+  openProject: (id) => ipcRenderer.invoke('project:open', id),
+
   send: (payload) => ipcRenderer.invoke('chat:send', payload),
   stop: () => ipcRenderer.invoke('chat:stop'),
   compact: () => ipcRenderer.invoke('chat:compact'),
