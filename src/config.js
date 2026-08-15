@@ -32,6 +32,8 @@ const DEFAULTS = {
   integrations: {
     githubToken: '',
     railwayToken: '',
+    tavilyApiKey: '',
+    tavilyApiKeyEnv: 'TAVILY_API_KEY',
   },
   permissions: {
     // allow = run without asking; ask = interactive y/n; deny = always refuse

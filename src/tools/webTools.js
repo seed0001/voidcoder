@@ -286,6 +286,20 @@ const defs = [
       required: ['url']
     }
   },
+  {
+    name: 'tavily_search',
+    description: 'Search the web via the Tavily API (requires a configured Tavily API key). More reliable than websearch since it is a real API, not HTML scraping, and can include an AI-generated answer summary plus optional page content. Best default choice for general web search when a key is configured.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'The search query' },
+        maxResults: { type: 'number', description: 'max results to return (default 5, max 20)' },
+        searchDepth: { type: 'string', enum: ['basic', 'advanced'], description: 'basic (default, fast) or advanced (deeper, slower, costs more credits)' },
+        includeAnswer: { type: 'boolean', description: 'include an AI-generated short answer summary (default true)' },
+      },
+      required: ['query']
+    }
+  },
 ];
 
 // ---------------- executors ----------------
@@ -552,6 +566,53 @@ function makeExecutors(ctx) {
         if (it.url) out += `   URL: ${it.url}\n`;
       });
       return out;
+    },
+
+    async tavily_search({ query, maxResults = 5, searchDepth = 'basic', includeAnswer = true }) {
+      if (!query || !query.trim()) return 'Provide a query.';
+      const integrations = (ctx && ctx.cfg && ctx.cfg.integrations) || {};
+      const apiKey = integrations.tavilyApiKey || process.env[integrations.tavilyApiKeyEnv || 'TAVILY_API_KEY'] || '';
+      if (!apiKey) return 'No Tavily API key configured. Add one in Settings → Integrations, or set the TAVILY_API_KEY environment variable.';
+
+      const key = cacheKey('tavily_search', query, searchDepth, String(maxResults), String(includeAnswer));
+      let body = cacheGet(key);
+      if (body === null) {
+        try {
+          const res = await fetchRetry('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              api_key: apiKey,
+              query,
+              search_depth: searchDepth,
+              max_results: Math.min(20, Math.max(1, maxResults)),
+              include_answer: includeAnswer,
+            }),
+          }, { retries: 1, timeoutMs: 20000 });
+          if (!res.ok) {
+            if (res.status === 401 || res.status === 403) return `Tavily rejected the API key (HTTP ${res.status}). Check the key in Settings → Integrations.`;
+            if (res.status === 432 || res.status === 433) return `Tavily usage limit reached (HTTP ${res.status}).`;
+            throw new Error(`HTTP ${res.status}`);
+          }
+          body = await res.text();
+          cacheSet(key, body);
+        } catch (err) {
+          return `tavily_search failed: ${err.message}`;
+        }
+      }
+      try {
+        const data = JSON.parse(body);
+        const results = (data.results || []).slice(0, maxResults);
+        if (!results.length && !data.answer) return `No Tavily results for "${query}".`;
+        let out = `Tavily Search Results for "${query}":\n\n`;
+        if (data.answer) out += `**Answer:** ${data.answer}\n\n`;
+        results.forEach((r, i) => {
+          out += `${i + 1}. **${r.title || '(untitled)'}**\n`;
+          out += `   URL: ${r.url}\n`;
+          if (r.content) out += `   Snippet: ${String(r.content).slice(0, 400)}\n`;
+        });
+        return out;
+      } catch (err) { return `tavily_search parse error: ${err.message}`; }
     },
   };
 }

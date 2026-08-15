@@ -230,6 +230,7 @@ function snapshot(provider) {
       integrations: {
         githubHasToken: !!(cfg.integrations?.githubToken || process.env.GITHUB_TOKEN),
         railwayHasToken: !!(cfg.integrations?.railwayToken || process.env.RAILWAY_TOKEN),
+        tavilyHasToken: !!(cfg.integrations?.tavilyApiKey || process.env[cfg.integrations?.tavilyApiKeyEnv || 'TAVILY_API_KEY']),
       },
       permissions: cfg.permissions,
       bashAllow: cfg.bashAllow,

@@ -716,13 +716,14 @@ function openSettings() {
   const up = st.updates || {};
   $('#st-updates-autocheck').checked = !!up.autoCheck;
   $('#updates-status').textContent = `Running v${up.currentVersion || '?'}`;
-  for (const id of ['st-key-openrouter', 'st-key-openai', 'st-token-github', 'st-token-railway', 'st-stt-key', 'st-key-fish']) $('#' + id).value = '';
+  for (const id of ['st-key-openrouter', 'st-key-openai', 'st-token-github', 'st-token-railway', 'st-token-tavily', 'st-stt-key', 'st-key-fish']) $('#' + id).value = '';
   $('#st-key-openrouter').placeholder = st.providers.openrouter?.hasKey ? '•••••••• (set — blank keeps it)' : 'sk-or-…';
   $('#st-key-openai').placeholder = st.providers.openai?.hasKey ? '•••••••• (set — blank keeps it)' : 'sk-…';
   $('#st-stt-key').placeholder = st.voice.stt.hasKey ? '•••••••• (set — blank keeps it)' : 'gsk_… (free at console.groq.com)';
   $('#st-key-fish').placeholder = st.voice.tts.fishHasKey ? '•••••••• (set — blank keeps it)' : '(optional premium voices)';
   $('#st-token-github').placeholder = st.integrations?.githubHasToken ? '•••••••• (set — blank keeps it)' : 'ghp_… (leave blank to keep)';
   $('#st-token-railway').placeholder = st.integrations?.railwayHasToken ? '•••••••• (set — blank keeps it)' : '(leave blank to keep)';
+  $('#st-token-tavily').placeholder = st.integrations?.tavilyHasToken ? '•••••••• (set — blank keeps it)' : 'tvly-… (leave blank to keep)';
   $('#modal-backdrop').classList.remove('hidden');
 }
 
@@ -760,6 +761,7 @@ async function saveSettings() {
       autoCheck: $('#st-updates-autocheck').checked,
     },
     providers: {},
+    integrations: {},
   };
   const or = $('#st-key-openrouter').value.trim();
   const oa = $('#st-key-openai').value.trim();
@@ -767,12 +769,14 @@ async function saveSettings() {
   const fk = $('#st-key-fish').value.trim();
   const gh = $('#st-token-github').value.trim();
   const rw = $('#st-token-railway').value.trim();
+  const tv = $('#st-token-tavily').value.trim();
   if (or) patch.providers.openrouter = { apiKey: or };
   if (oa) patch.providers.openai = { apiKey: oa };
   if (gq) patch.voice.stt.apiKey = gq;
   if (fk) patch.voice.tts.fish = { ...(patch.voice.tts.fish || {}), apiKey: fk };
   if (gh) patch.integrations.githubToken = gh;
   if (rw) patch.integrations.railwayToken = rw;
+  if (tv) patch.integrations.tavilyApiKey = tv;
 
   snap = await window.vc.saveSettings(patch);
 

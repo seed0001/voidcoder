@@ -314,7 +314,7 @@ async function main() {
   const maskKey = (k) => (k ? `${k.slice(0, 8)}…${k.slice(-4)}` : c.muted('(not set)'));
 
   const setIntegrationTokenFlow = async (name, envName) => {
-    const label = name === 'githubToken' ? 'GitHub' : 'Railway';
+    const label = name === 'githubToken' ? 'GitHub' : name === 'railwayToken' ? 'Railway' : 'Tavily';
     const token = await askMasked(`  ${label} token (Enter to clear): `);
     if (token.startsWith('/') || /\s/.test(token)) {
       console.log(c.warn('  that does not look like a token — not saved'));
@@ -344,7 +344,7 @@ async function main() {
       console.log(`\n${c.bold('settings')} ${c.muted(`(saved to ${cfg._globalPath})`)}`);
       console.log(`  1) provider & model   ${c.info(`${provider.name}/${provider.model}`)}`);
       console.log(`  2) API keys           ${Object.entries(cfg.providers).map(([n, p]) => `${n}:${p.apiKey || (p.apiKeyEnv && process.env[p.apiKeyEnv]) ? c.ok('set') : c.muted('—')}`).join('  ')}`);
-      console.log(`  3) integrations       GitHub:${cfg.integrations?.githubToken || process.env.GITHUB_TOKEN ? c.ok('set') : c.muted('—')}  Railway:${cfg.integrations?.railwayToken || process.env.RAILWAY_TOKEN ? c.ok('set') : c.muted('—')}`);
+      console.log(`  3) integrations       GitHub:${cfg.integrations?.githubToken || process.env.GITHUB_TOKEN ? c.ok('set') : c.muted('—')}  Railway:${cfg.integrations?.railwayToken || process.env.RAILWAY_TOKEN ? c.ok('set') : c.muted('—')}  Tavily:${cfg.integrations?.tavilyApiKey || process.env[cfg.integrations?.tavilyApiKeyEnv || 'TAVILY_API_KEY'] ? c.ok('set') : c.muted('—')}`);
       console.log(`  4) permissions        ${Object.entries(perms).map(([k, v]) => `${k}=${v}`).join(' ')}`);
       console.log(`  5) auto-allowed bash  ${c.muted((cfg.bashAllow || []).join(', ').slice(0, 70) || '(none)')}`);
       console.log(`  6) custom persona     ${cfg.persona ? c.ok('set') : c.muted('—')}`);
@@ -367,9 +367,10 @@ async function main() {
       } else if (choice === '2') {
         await setKeyFlow();
       } else if (choice === '3') {
-        const target = await ask('  integration [github/railway]: ');
+        const target = await ask('  integration [github/railway/tavily]: ');
         if (target === 'github') await setIntegrationTokenFlow('githubToken', 'GITHUB_TOKEN');
         else if (target === 'railway') await setIntegrationTokenFlow('railwayToken', 'RAILWAY_TOKEN');
+        else if (target === 'tavily') await setIntegrationTokenFlow('tavilyApiKey', 'TAVILY_API_KEY');
         else console.log(c.err('  invalid integration'));
       } else if (choice === '4') {
         const cat = await ask('  category [bash/write/webfetch/mcp]: ');
