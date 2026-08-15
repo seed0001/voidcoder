@@ -713,6 +713,9 @@ function openSettings() {
   $('#st-wportal-port').value = wp.port || 8777;
   $('#st-wportal-cfpath').value = wp.cloudflaredPath || '';
   refreshPortalStatus();
+  const up = st.updates || {};
+  $('#st-updates-autocheck').checked = !!up.autoCheck;
+  $('#updates-status').textContent = `Running v${up.currentVersion || '?'}`;
   for (const id of ['st-key-openrouter', 'st-key-openai', 'st-token-github', 'st-token-railway', 'st-stt-key', 'st-key-fish']) $('#' + id).value = '';
   $('#st-key-openrouter').placeholder = st.providers.openrouter?.hasKey ? '•••••••• (set — blank keeps it)' : 'sk-or-…';
   $('#st-key-openai').placeholder = st.providers.openai?.hasKey ? '•••••••• (set — blank keeps it)' : 'sk-…';
@@ -752,6 +755,9 @@ async function saveSettings() {
       tunnel: $('#st-wportal-tunnel').value,
       port: parseInt($('#st-wportal-port').value, 10) || 8777,
       cloudflaredPath: $('#st-wportal-cfpath').value.trim(),
+    },
+    updates: {
+      autoCheck: $('#st-updates-autocheck').checked,
     },
     providers: {},
   };
@@ -858,6 +864,30 @@ document.getElementById('wportal-copy').addEventListener('click', async () => {
   if (st.url) lines.push(`Public: ${st.url}  (keep this private)`);
   lines.push(`Access token: ${st.token}`);
   copyText(lines.join('\n'));
+});
+
+// ============================================================ updates
+
+function renderUpdateStatus(status) {
+  const el = $('#updates-status');
+  const dl = $('#updates-download-btn');
+  const inst = $('#updates-install-btn');
+  dl.classList.add('hidden');
+  inst.classList.add('hidden');
+  switch (status.state) {
+    case 'checking': el.textContent = 'checking for updates…'; break;
+    case 'available': el.textContent = `update available: v${status.version}`; dl.classList.remove('hidden'); break;
+    case 'not-available': el.textContent = `up to date · v${snap?.settings?.updates?.currentVersion || '?'}`; break;
+    case 'downloading': el.textContent = `downloading update… ${status.percent || 0}%`; break;
+    case 'downloaded': el.textContent = `v${status.version} downloaded — restart to install`; inst.classList.remove('hidden'); break;
+    case 'error': el.textContent = `update check failed: ${status.message}`; break;
+  }
+}
+
+document.getElementById('updates-check-btn').addEventListener('click', () => window.vc.checkForUpdates());
+document.getElementById('updates-download-btn').addEventListener('click', () => window.vc.downloadUpdate());
+document.getElementById('updates-install-btn').addEventListener('click', () => {
+  if (confirm('Restart VoidCode to install the update?')) window.vc.installUpdate();
 });
 
 // ============================================================ desktop shell
@@ -1051,6 +1081,7 @@ function bind() {
     if (e.target.id === 'modal-backdrop') $('#modal-backdrop').classList.add('hidden');
   });
   window.vc.onPortalStatus?.(() => { refreshPortalStatus(); });
+  window.vc.onUpdateStatus?.(renderUpdateStatus);
 
   // schedule modal
   $('#sched-save').addEventListener('click', saveSchedTask);

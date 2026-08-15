@@ -113,6 +113,12 @@ const DEFAULTS = {
     port: 8777,           // localhost bind port (never exposed directly)
     cloudflaredPath: '',  // optional explicit path to cloudflared.exe
   },
+  // Desktop app auto-updates (electron-updater, GitHub Releases). Opt-in —
+  // checking for updates on launch only happens if autoCheck is true; a
+  // manual "Check for updates now" button works either way.
+  updates: {
+    autoCheck: false,
+  },
   // Discord integration (src/discord/*). Wholly OPTIONAL and additive — the
   // daemon (bin/voidcode-discord.js) simply exits if discord.enabled is false,
   // and nothing here affects the terminal/desktop/portal paths.

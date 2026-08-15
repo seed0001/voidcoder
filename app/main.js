@@ -42,6 +42,10 @@ const { Scheduler } = require('../src/scheduler');
 const schedule = require('../src/schedule');
 const costTracker = require('../src/costTracker');
 const portal = require('./portal');
+const { autoUpdater } = require('electron-updater');
+
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = false;
 
 let win = null;
 let cfg = null;
@@ -59,6 +63,15 @@ function send(channel, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
   portal.emit(channel, payload);
 }
+
+// ---------------------------------------------------------------- auto-updates
+
+autoUpdater.on('checking-for-update', () => send('updates:status', { state: 'checking' }));
+autoUpdater.on('update-available', (info) => send('updates:status', { state: 'available', version: info.version }));
+autoUpdater.on('update-not-available', () => send('updates:status', { state: 'not-available' }));
+autoUpdater.on('download-progress', (p) => send('updates:status', { state: 'downloading', percent: Math.round(p.percent) }));
+autoUpdater.on('update-downloaded', (info) => send('updates:status', { state: 'downloaded', version: info.version }));
+autoUpdater.on('error', (err) => send('updates:status', { state: 'error', message: err?.message || String(err) }));
 
 // ---------------------------------------------------------------- engine wiring
 
@@ -206,6 +219,10 @@ function snapshot(provider) {
         tunnelStatus: portal.tunnelStatus,
         tunnelError: portal.tunnelError || '',
       },
+      updates: {
+        autoCheck: !!(cfg.updates && cfg.updates.autoCheck),
+        currentVersion: app.getVersion(),
+      },
       providers: Object.fromEntries(Object.entries(cfg.providers).map(([n, p]) => [n, {
         baseUrl: p.baseUrl,
         hasKey: !!(p.apiKey || (p.apiKeyEnv && process.env[p.apiKeyEnv])),
@@ -281,6 +298,11 @@ app.whenReady().then(async () => {
     } catch (err) {
       console.log(`portal autostart failed: ${err.message}`);
     }
+  }
+
+  // ---- auto-updates (opt-in) ----
+  if (cfg.updates && cfg.updates.autoCheck) {
+    autoUpdater.checkForUpdates().catch((err) => console.log(`update check failed: ${err.message}`));
   }
 
   // ---- scheduler (background tasks) ----
@@ -453,6 +475,10 @@ ipcMain.handle('settings:setModel', (e, modelStr) => {
   buildAgent();
   return snapshot();
 });
+
+ipcMain.handle('updates:check', () => autoUpdater.checkForUpdates().catch((err) => send('updates:status', { state: 'error', message: err.message })));
+ipcMain.handle('updates:download', () => autoUpdater.downloadUpdate().catch((err) => send('updates:status', { state: 'error', message: err.message })));
+ipcMain.handle('updates:install', () => autoUpdater.quitAndInstall());
 
 ipcMain.handle('models:list', async () => {
   // Live model discovery: installed Ollama models, the GGUF loaded in

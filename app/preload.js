@@ -54,6 +54,11 @@ contextBridge.exposeInMainWorld('vc', {
   onPortalLog: on('portal:log'),
   onPortalStatus: on('portal:status'),
 
+  checkForUpdates: () => ipcRenderer.invoke('updates:check'),
+  downloadUpdate: () => ipcRenderer.invoke('updates:download'),
+  installUpdate: () => ipcRenderer.invoke('updates:install'),
+  onUpdateStatus: on('updates:status'),
+
   getModelList: () => ipcRenderer.invoke('model:list'),
   setModelId: (modelId) => ipcRenderer.invoke('model:set', { modelId }),
   getAgentStructure: () => ipcRenderer.invoke('agent:structure'),
