@@ -1,9 +1,12 @@
 // Structured continuation packet — the ONLY thing that may ever fill the gap
-// when a model completion comes back with neither content nor a tool call
-// right after a tool ran (observed after successful `read`/`edit` calls and
-// after a failed `edit`). Replaces the old blank/fake "[continue]" user
-// message: every field is derived from real turn state, and any unknown
-// field says so explicitly instead of being invented or left blank.
+// when a model completion comes back with neither content nor a tool call.
+// Observed both right after a tool ran (successful `read`/`edit` calls, a
+// failed `edit`) and on a fresh turn before any tool has run yet — in the
+// latter case there is no tool state to report, so those fields render as
+// "(unknown)"/"unavailable" rather than being invented. Replaces the old
+// blank/fake "[continue]" user message: every field is derived from real
+// turn state, and any unknown field says so explicitly instead of being
+// invented or left blank.
 //
 // Shared by src/agent.js (main/subagent/worker loops) and src/focus.js
 // (background focus sessions) — kept in its own module (no dependency on

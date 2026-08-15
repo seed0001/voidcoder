@@ -647,14 +647,18 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       if (!result.toolCalls.length) {
         if (!result.content || !result.content.trim()) {
           // Some providers/models emit an empty completion (no content, no
-          // tool call) right after a tool round — observed in practice after
-          // successful `read` calls and after a failed `edit`. There IS real
-          // continuation state available (the tool that just ran and its
-          // result), so hand the model a structured continuation packet
-          // instead of a blank/fake user turn that forces it to guess.
+          // tool call) — observed in practice right after a tool round
+          // (successful `read` calls, a failed `edit`), but ALSO on a fresh
+          // turn before any tool has run yet (first round of a new user
+          // message, subagent prompt, or worker handoff). Either way there is
+          // SOME continuation state worth handing back — a prior tool call/
+          // result this turn if one exists, otherwise just the active task —
+          // so build a structured continuation packet instead of a blank/fake
+          // user turn that forces the model to guess, or worse, a hard stop.
           const lastMsg = messages[messages.length - 1];
           const cameFromTool = lastMsg && lastMsg.role === 'tool';
-          if (cameFromTool && emptyRetries < MAX_EMPTY_RETRIES) {
+          const haveAnchor = cameFromTool || !!lastToolCall;
+          if (emptyRetries < MAX_EMPTY_RETRIES) {
             emptyRetries++;
             pendingContinuation = buildContinuationPacket({
               activeTask: taskLabel || organismTask || `${kind} turn`,
@@ -662,13 +666,17 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
               remainingSteps: describeRemainingSteps(this.toolCtx?.todos),
               previousIntendedAction: lastToolCall
                 ? `${lastToolCall.name}(${clip(JSON.stringify(lastToolCall.args || {}), 200)})`
-                : 'unknown (no recorded tool call for this result)',
-              toolCalled: lastToolCall?.name || guardrails.lastToolName(messages) || 'unknown',
-              toolResult: lastToolResult || { ok: !/^(ERROR|DENIED|FAILED):/i.test(String(lastMsg.content || '')), output: lastMsg.content },
+                : null,
+              toolCalled: lastToolCall?.name || guardrails.lastToolName(messages) || null,
+              toolResult: lastToolResult || (cameFromTool
+                ? { ok: !/^(ERROR|DENIED|FAILED):/i.test(String(lastMsg.content || '')), output: lastMsg.content }
+                : null),
               completedWork,
               expectedNextStep: lastToolResult && !lastToolResult.ok
                 ? 'The last tool call failed or was denied. Do not repeat the identical call. Adjust the arguments, choose a different tool/approach, or explain the failure and ask if you are blocked.'
-                : 'Use the tool result above to decide the next concrete action toward the active task and continue.',
+                : haveAnchor
+                  ? 'Use the tool result above to decide the next concrete action toward the active task and continue.'
+                  : 'Nothing has run yet this turn — respond to the active task above directly, either with a normal reply or a tool call. Do not return another empty completion.',
               stopConditions: [
                 'If continuation state above is insufficient to determine a valid next action, say so plainly and stop rather than inventing one.',
                 `${Math.max(0, maxRounds - round - 1)} tool round(s) remain in this turn.`,
@@ -676,12 +684,11 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
             });
             continue;
           }
-          // Retries exhausted, or there is no tool call to anchor a
-          // continuation packet on at all: stop and report rather than
-          // let the model invent its next action from nothing.
-          const reason = cameFromTool
+          // Retries exhausted: stop and report rather than let the model
+          // invent its next action from nothing, or loop forever on blanks.
+          const reason = haveAnchor
             ? `the model did not act on ${emptyRetries} structured continuation packet(s) after the "${lastToolCall?.name || 'last'}" tool call`
-            : 'no prior tool call is available to anchor a continuation packet on';
+            : `the model returned ${emptyRetries + 1} consecutive empty completions with no tool call to anchor a continuation packet on`;
           throw new Error(`Model returned an empty response (${reason}). Stopping rather than guessing at the next action. Please retry or try a different model.`);
         }
 

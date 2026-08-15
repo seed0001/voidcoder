@@ -20,6 +20,10 @@
 //      shell errors, truncated results, retries, sub-agents, focus agents,
 //      and scheduled tasks (autonomous sends with an organism task label).
 //   5. Normal user messages and existing session behavior are unaffected.
+//   6. The packet also fires on a blank completion with NO prior tool call
+//      this turn (a fresh user message, subagent prompt, or worker handoff) —
+//      that used to skip retries entirely and throw immediately, since the
+//      recovery was gated on the previous message being a tool result.
 
 const fs = require('fs');
 const os = require('os');
@@ -430,6 +434,61 @@ async function main() {
 
     assertNoFakeUserTurns(session.messages, 'session.messages');
     assert(!session.messages.some((m) => m.role === 'system'), 'no packet should have leaked into persisted history even on failure');
+
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  // ================================================================
+  // e2e: fresh turn, no tool anchor yet — the harness used to throw
+  // immediately here instead of retrying, because the packet was gated on
+  // the previous message being a tool result.
+  // ================================================================
+
+  await checkAsync('fresh turn: an empty completion with no prior tool call this turn still gets a continuation packet, not an immediate stop', async () => {
+    const cwd = mkTmp('voidcode-cont-freshturn-');
+    const script = scriptStreamChat([
+      { content: '', toolCalls: [] }, // the bug trigger: blank completion on round 1, before any tool has run
+      { content: 'Sure — happy to help with that.' },
+    ]);
+    const { agent, session } = makeAgent({ cwd, script });
+
+    const result = await agent.send('hello, are you there?');
+    assert.strictEqual(result, 'Sure — happy to help with that.');
+
+    const retryReq = script.calls[1];
+    const packetMsg = findSystemPacket(retryReq);
+    assert(packetMsg, 'expected a [Continuation Packet] system message on the retry request even with no tool anchor');
+    assert(packetMsg.content.includes('Tool called: (unknown)'));
+    assert(packetMsg.content.includes('Tool result: unavailable'));
+    assert(packetMsg.content.includes('Nothing has run yet this turn'));
+    assert(!packetMsg.content.match(/this is a new user message/i));
+
+    assertNoFakeUserTurns(session.messages, 'session.messages');
+    assert(!session.messages.some((m) => m.role === 'system'), 'continuation packet leaked into persisted session history');
+
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  await checkAsync('fresh turn retries exhausted: repeated blank completions with no tool anchor still stop and report, never loop forever', async () => {
+    const cwd = mkTmp('voidcode-cont-freshretry-');
+    const script = scriptStreamChat([{ content: '', toolCalls: [] }]);
+    const { agent, session } = makeAgent({ cwd, script });
+
+    let thrown = null;
+    try {
+      await agent.send('hello?');
+    } catch (err) {
+      thrown = err;
+    }
+    assert(thrown, 'expected the loop to stop and throw once continuation retries are exhausted');
+    assert(/[Ss]topping rather than guessing/.test(thrown.message), thrown.message);
+    assert(/no tool call to anchor/.test(thrown.message), thrown.message);
+
+    const packetRequests = script.calls.filter((reqMsgs) => findSystemPacket(reqMsgs));
+    assert.strictEqual(packetRequests.length, 2, `expected exactly 2 continuation-packet retries, got ${packetRequests.length}`);
+
+    assertNoFakeUserTurns(session.messages, 'session.messages');
+    assert(!session.messages.some((m) => m.role === 'system'));
 
     fs.rmSync(cwd, { recursive: true, force: true });
   });
