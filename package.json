@@ -27,7 +27,7 @@
       "provider": "github",
       "owner": "seed0001",
       "repo": "voidcoder",
-      "draft": false
+      "releaseType": "release"
     },
     "files": [
       "app/**/*",
