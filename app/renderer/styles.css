@@ -561,10 +561,29 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 .todo-item.pending { color: var(--dim); }
 
 /* ---------------- settings modal ---------------- */
-#modal-backdrop {
+#modal-backdrop, #container-name-backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,0.55);
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
+#container-name-modal {
+  width: 320px;
+  background: var(--bg1); border: 1px solid var(--border); border-radius: 6px;
+  padding: 16px 18px; animation: pop-in 180ms ease;
+}
+#container-name-modal h3 { font-size: 14px; margin-bottom: 10px; color: var(--text); }
+#cn-input {
+  width: 100%; background: var(--bg2); color: var(--text); border: 1px solid var(--border);
+  border-radius: 3px; padding: 7px 9px; font: inherit; font-size: 13px; outline: none;
+}
+#cn-input:focus { border-color: #a078ff; }
+.cn-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.cn-actions button {
+  padding: 6px 14px; border-radius: 4px; font-size: 13px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--text);
+}
+#cn-create { background: #a078ff; border-color: #a078ff; color: #fff; font-weight: 600; }
+#cn-create:hover { filter: brightness(1.1); }
+#cn-cancel:hover { border-color: var(--dim); }
 #settings-modal {
   width: 680px; max-height: 84vh; overflow-y: auto;
   background: var(--bg1); border: 1px solid var(--border); border-radius: 4px;

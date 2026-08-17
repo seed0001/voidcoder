@@ -1243,11 +1243,31 @@ function bind() {
     if (s) { snap = s; renderDesktop(); }
   });
 
-  $('#desktop-add-container-btn').addEventListener('click', async () => {
-    const name = prompt('Container name:');
-    if (!name || !name.trim()) return;
-    const s = await window.vc.createContainer(name.trim());
+  // window.prompt() is not implemented in Electron's renderer — it returns
+  // null immediately with no visible dialog at all, which is why the old
+  // prompt()-based version of this button silently did nothing. A real
+  // HTML modal, same pattern as the settings/schedule modals.
+  $('#desktop-add-container-btn').addEventListener('click', () => {
+    $('#cn-input').value = '';
+    $('#container-name-backdrop').classList.remove('hidden');
+    $('#cn-input').focus();
+  });
+  const closeContainerNameModal = () => $('#container-name-backdrop').classList.add('hidden');
+  const submitContainerName = async () => {
+    const name = $('#cn-input').value.trim();
+    if (!name) return;
+    closeContainerNameModal();
+    const s = await window.vc.createContainer(name);
     if (s) { snap = s; renderDesktop(); }
+  };
+  $('#cn-create').addEventListener('click', submitContainerName);
+  $('#cn-cancel').addEventListener('click', closeContainerNameModal);
+  $('#cn-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitContainerName();
+    if (e.key === 'Escape') closeContainerNameModal();
+  });
+  $('#container-name-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'container-name-backdrop') closeContainerNameModal();
   });
 
   setupContainerStrip();

@@ -147,6 +147,36 @@ async function main() {
     assert.strictEqual(alt, null);
   });
 
+  await checkAsync('regression: a catalog lookup MISS for the failed model still stays on its own provider — never falls through cross-provider', async () => {
+    // Simulates the real bug: Ollama momentarily unreachable at the exact
+    // instant a collapse fires, so the failed model's own entry isn't in
+    // this round's catalog snapshot. Before the fix, `failed` being
+    // undefined skipped the provider filter entirely and the price anchor
+    // defaulted to $0, so it could return ANY free/cheap model on ANY
+    // provider — observed in practice picking a random OpenRouter model
+    // instead of another local Ollama one.
+    const cfg = { providers: { ollama: {}, openrouter: {} } };
+    const catalog = [
+      // Deliberately does NOT include 'ollama/llama3.1' (the "failed" id) —
+      // that's the whole point of this test.
+      { id: 'ollama/mistral', provider: 'ollama', modelName: 'mistral', costTier: 'free', pricing: { prompt: 0, completion: 0 } },
+      { id: 'openrouter/qwen/qwen-2.5-72b', provider: 'openrouter', modelName: 'qwen/qwen-2.5-72b', costTier: 'economy', pricing: { prompt: 0.00000025, completion: 0.0000009 } },
+    ];
+    const alt = await suggestFailoverModel(cfg, '.', 'ollama/llama3.1', { models: catalog });
+    assert(alt, 'expected a same-provider fallback to still be found');
+    assert.strictEqual(alt.provider, 'ollama', 'must never cross into openrouter just because the failed model itself was not in this catalog snapshot');
+    assert.strictEqual(alt.id, 'ollama/mistral');
+  });
+
+  await checkAsync('regression: a catalog lookup miss with NO other same-provider candidate returns null, not a cross-provider guess', async () => {
+    const cfg = { providers: { ollama: {}, openrouter: {} } };
+    const catalog = [
+      { id: 'openrouter/qwen/qwen-2.5-72b', provider: 'openrouter', modelName: 'qwen/qwen-2.5-72b', costTier: 'economy', pricing: { prompt: 0.00000025, completion: 0.0000009 } },
+    ];
+    const alt = await suggestFailoverModel(cfg, '.', 'ollama/llama3.1', { models: catalog });
+    assert.strictEqual(alt, null, 'no ollama alternative exists, so this must give up rather than guessing an openrouter model');
+  });
+
   // ================================================================
   // e2e: Agent._loop actually detects and recovers from a collapse
   // ================================================================
@@ -208,6 +238,48 @@ async function main() {
     assert.strictEqual(agent.provider.model, 'qwen/qwen-2.5-72b');
 
     fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  await checkAsync('regression: a collapse-triggered switch never persists to the user\'s saved global config (config.saveGlobal)', async () => {
+    // The real incident: this code path used to call the REAL saveGlobal(),
+    // which writes unconditionally to ~/.voidcode/config.json — no test
+    // isolation exists for that path. Every test run that exercised a
+    // mocked collapse+switch was silently overwriting the actual user's
+    // saved model choice on this machine. Spied here (never calling
+    // through) specifically so this test can never repeat that mistake
+    // itself while still proving production code doesn't call it.
+    const configModule = require('../src/config');
+    const originalSaveGlobal = configModule.saveGlobal;
+    let saveGlobalCalls = 0;
+    configModule.saveGlobal = () => { saveGlobalCalls++; };
+    try {
+      const cwd = mkTmp('voidcode-collapse-nopersist-');
+      const script = scriptStreamChat([
+        { content: REAL_COLLAPSE_SAMPLE },
+        { content: 'All good now.' },
+      ]);
+      const session = makeSession();
+      const cfg = {
+        provider: 'openrouter', model: 'deepseek/deepseek-v4-flash', agentMode: 'legacy',
+        maxToolRounds: 10, compactAt: 0.75, contextTokens: 128000,
+        providers: { openrouter: { baseUrl: 'https://openrouter.ai/api/v1' } },
+        guardrails: {},
+      };
+      const provider = { name: 'openrouter', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'deepseek/deepseek-v4-flash', contextTokens: 128000 };
+      const permissions = { check: async () => true };
+      const suggestFailoverModelFn = async () => ({ provider: 'openrouter', modelName: 'qwen/qwen-2.5-72b' });
+      const agent = new Agent({ cfg, provider, session, permissions, events: {}, cwd, streamChatFn: script.fn, suggestFailoverModelFn });
+
+      const result = await agent.send('review the auth module');
+
+      assert.strictEqual(result, 'All good now.');
+      assert.strictEqual(agent.provider.model, 'qwen/qwen-2.5-72b', 'the in-memory session model should still switch, just not persist');
+      assert.strictEqual(saveGlobalCalls, 0, 'a collapse-triggered switch must NEVER write to the saved global config — only an explicit user model change should');
+
+      fs.rmSync(cwd, { recursive: true, force: true });
+    } finally {
+      configModule.saveGlobal = originalSaveGlobal;
+    }
   });
 
   await checkAsync('a subagent collapse switches that subagent\'s model but does not touch the main session\'s model', async () => {

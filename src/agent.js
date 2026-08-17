@@ -714,19 +714,22 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
               const alt = await this.suggestFailoverModelFn(this.cfg, this.toolCtx.cwd, failedId, { excludeIds: [...collapsedModelIds] });
               if (alt) {
                 const altId = `${alt.provider}/${alt.modelName}`;
-                const { resolveProvider, saveGlobal } = require('./config');
+                const { resolveProvider } = require('./config');
                 const altProvider = resolveProvider(this.cfg, altId);
                 prov = altProvider;
                 switched = true;
                 // Main chat-side turn only (no explicit worker/subagent
-                // override) — make the swap stick for the rest of the
-                // session too. A subagent/worker/focus collapse should not
-                // silently change the user's own main model.
-                if (!provider) {
-                  this.provider = altProvider;
-                  try { saveGlobal({ provider: altProvider.name, model: altProvider.model }); } catch { /* best-effort */ }
-                }
-                if (showTools) this.events.onStatus?.(`switched to ${altId} after model collapse — retrying…`);
+                // override) — make the swap stick for the REST OF THIS
+                // RUNNING SESSION so the very next turn doesn't immediately
+                // re-hit the model that just collapsed. Deliberately NOT
+                // persisted to the user's saved global config (no
+                // saveGlobal here) — an automated heuristic misfiring once
+                // must never silently overwrite the model the user actually
+                // chose, permanently, across restarts. It reverts to their
+                // real saved choice next launch; explicit switches via
+                // setModel()/the model picker still persist as normal.
+                if (!provider) this.provider = altProvider;
+                if (showTools) this.events.onStatus?.(`switched to ${altId} after model collapse (this session only) — retrying…`);
               } else if (showTools) {
                 this.events.onStatus?.(`no alternate model available in ${failedId}'s price range; continuing on the same model.`);
               }

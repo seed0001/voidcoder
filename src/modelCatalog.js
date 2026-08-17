@@ -285,10 +285,16 @@ function estimateCost(model, usage = {}) {
 async function suggestFailoverModel(cfg, cwd, failedModelId, { excludeIds = [], models: modelsOverride = null } = {}) {
   const models = modelsOverride || await discoverModels(cfg, cwd);
   const failed = models.find((m) => m.id === failedModelId);
+  // The provider MUST be derivable even when the failed model's own catalog
+  // entry can't be found (e.g. Ollama/llama.cpp momentarily unreachable at
+  // the exact instant a collapse fires) — falling through to an unfiltered,
+  // cross-provider pool here was a real bug: it let a local-model collapse
+  // get "fixed" by silently switching to an arbitrary cheap/free OpenRouter
+  // model, with no guarantee that provider is even configured.
+  const failedProvider = failed?.provider || String(failedModelId).split('/')[0];
   const exclude = new Set([failedModelId, ...excludeIds]);
 
-  let pool = models.filter((m) => !exclude.has(m.id));
-  if (failed) pool = pool.filter((m) => m.provider === failed.provider);
+  const pool = models.filter((m) => !exclude.has(m.id) && m.provider === failedProvider);
   if (!pool.length) return null;
 
   const priceOf = (m) => (m.pricing?.prompt || 0) + (m.pricing?.completion || 0);
