@@ -1,6 +1,6 @@
 {
   "name": "voidcode",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "VoidCode — a terminal and desktop AI agent harness with an optional SQL-backed execution context.",
   "main": "app/main.js",
   "bin": {
