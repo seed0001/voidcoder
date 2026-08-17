@@ -902,6 +902,25 @@ function showView(view) {
 }
 
 const FOLDER_ICON_SVG = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
+// Distinct glyph for containers (a stack of layers) — visually separates
+// "reference collection" icons from plain folder-backed projects at a glance.
+const CONTAINER_ICON_SVG = '<svg viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5z"/><path d="m3 13 9 5 9-5"/><path d="m3 18 9 5 9-5"/></svg>';
+
+// Mirrors DESKTOP_GRID in app/main.js — must stay in sync so a locally
+// snapped drag preview lands on the exact cell the main process will save.
+const DESKTOP_GRID = { originX: 32, originY: 32, cellW: 104, cellH: 104 };
+function snapToGrid(x, y) {
+  const col = Math.max(0, Math.round((x - DESKTOP_GRID.originX) / DESKTOP_GRID.cellW));
+  const row = Math.max(0, Math.round((y - DESKTOP_GRID.originY) / DESKTOP_GRID.cellH));
+  return { x: DESKTOP_GRID.originX + col * DESKTOP_GRID.cellW, y: DESKTOP_GRID.originY + row * DESKTOP_GRID.cellH };
+}
+// How many columns actually fit the current desktop viewport — arranging
+// wraps icons based on the real window size, not a fixed guess.
+function desktopGridCols() {
+  const host = $('#desktop-view');
+  const usable = Math.max(DESKTOP_GRID.cellW, host.clientWidth - DESKTOP_GRID.originX);
+  return Math.max(1, Math.floor(usable / DESKTOP_GRID.cellW));
+}
 
 function renderDesktop() {
   const host = $('#desktop-icons');
@@ -913,12 +932,41 @@ function renderDesktop() {
     el.style.left = (p.x ?? (32 + (i % 6) * 104)) + 'px';
     el.style.top = (p.y ?? (32 + Math.floor(i / 6) * 104)) + 'px';
     el.innerHTML = `${FOLDER_ICON_SVG}<span>${escapeHtml(p.name)}</span>`;
-    bindDesktopIcon(el, p);
+    bindDesktopIcon(el, p, 'project');
     host.appendChild(el);
+  });
+  (snap?.containers || []).forEach((c, i) => {
+    const el = document.createElement('div');
+    el.className = 'desktop-icon desktop-icon-container';
+    el.dataset.id = c.id;
+    el.style.left = (c.x ?? 32) + 'px';
+    el.style.top = (c.y ?? 32) + 'px';
+    el.innerHTML = `${CONTAINER_ICON_SVG}<span>${escapeHtml(c.name)}</span><span class="dicon-caption" data-container-caption="${c.id}"></span>`;
+    bindDesktopIcon(el, c, 'container');
+    host.appendChild(el);
+    loadContainerCaption(c.id);
   });
 }
 
-function bindDesktopIcon(el, project) {
+async function loadContainerCaption(id) {
+  try {
+    const status = await window.vc.getContainerStatus(id);
+    const el = document.querySelector(`[data-container-caption="${id}"]`);
+    if (!el || !status) return;
+    const trouble = (status.counts.missing || 0) + (status.counts.error || 0);
+    el.textContent = trouble
+      ? `${status.counts.total} refs · ${trouble} need attention`
+      : `${status.counts.total} ref${status.counts.total === 1 ? '' : 's'}`;
+  } catch { /* best-effort caption */ }
+}
+
+// Shared drag/snap/open/remove wiring for both project and container icons —
+// `kind` picks which IPC bridge calls to use, everything else is identical.
+function bindDesktopIcon(el, item, kind = 'project') {
+  const bridge = kind === 'container'
+    ? { move: window.vc.moveContainer, remove: window.vc.removeContainer, open: window.vc.openContainer }
+    : { move: window.vc.moveProject, remove: window.vc.removeProject, open: window.vc.openProject };
+
   let dragging = false;
   let moved = false;
   let startX = 0, startY = 0, origLeft = 0, origTop = 0;
@@ -952,23 +1000,75 @@ function bindDesktopIcon(el, project) {
     el.classList.remove('dragging');
     el.releasePointerCapture(e.pointerId);
     if (moved) {
-      await window.vc.moveProject(project.id, el.offsetLeft, el.offsetTop);
+      const snapped = snapToGrid(el.offsetLeft, el.offsetTop);
+      el.style.left = snapped.x + 'px';
+      el.style.top = snapped.y + 'px';
+      await bridge.move(item.id, snapped.x, snapped.y);
     }
   });
 
   el.addEventListener('dblclick', async () => {
     if (moved) return;
-    snap = await window.vc.openProject(project.id);
+    snap = await bridge.open(item.id);
     showView('assistant');
     renderAll();
   });
 
   el.addEventListener('contextmenu', async (e) => {
     e.preventDefault();
-    if (!confirm(`Remove "${project.name}" from the desktop?`)) return;
-    snap = await window.vc.removeProject(project.id);
+    const label = kind === 'container'
+      ? `Remove container "${item.name}" from the desktop? This only removes VoidCode's index — none of the referenced files are touched.`
+      : `Remove "${item.name}" from the desktop?`;
+    if (!confirm(label)) return;
+    snap = await bridge.remove(item.id);
     renderDesktop();
   });
+}
+
+// Windows-style "Arrange icons by" — right-click the empty desktop (not an
+// icon) to sort every icon by name or by creation date, re-laid-out on the
+// grid. A minimal self-built popup since the app has no menu component.
+function closeDesktopMenu() {
+  document.querySelector('.desktop-ctx-menu')?.remove();
+}
+
+function showDesktopContextMenu(clientX, clientY) {
+  closeDesktopMenu();
+  const menu = document.createElement('div');
+  menu.className = 'desktop-ctx-menu';
+  menu.style.left = clientX + 'px';
+  menu.style.top = clientY + 'px';
+  menu.innerHTML = `
+    <div class="dcm-label">Arrange icons by</div>
+    <button data-by="name">Name</button>
+    <button data-by="created">Date created</button>
+  `;
+  document.body.appendChild(menu);
+
+  menu.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const by = btn.dataset.by;
+      closeDesktopMenu();
+      // Sequential, not parallel: both calls read-modify-write the same
+      // global config file, so firing them concurrently risks one save
+      // clobbering the other's write.
+      snap = await window.vc.arrangeProjects(by, desktopGridCols());
+      snap = await window.vc.arrangeContainers(by, desktopGridCols());
+      renderDesktop();
+    });
+  });
+
+  // Close on any click elsewhere, or Escape.
+  const onDocClick = (e) => { if (!menu.contains(e.target)) { closeDesktopMenu(); cleanup(); } };
+  const onKey = (e) => { if (e.key === 'Escape') { closeDesktopMenu(); cleanup(); } };
+  const cleanup = () => {
+    document.removeEventListener('pointerdown', onDocClick, true);
+    document.removeEventListener('keydown', onKey);
+  };
+  setTimeout(() => {
+    document.addEventListener('pointerdown', onDocClick, true);
+    document.addEventListener('keydown', onKey);
+  }, 0);
 }
 
 function renderAll() {
@@ -984,6 +1084,92 @@ function renderAll() {
   refreshReview();
   renderSchedule();
   renderDesktop();
+  renderContainerStrip();
+}
+
+// ============================================================ container strip
+// Shown inside the chat view only when the currently open session is scoped
+// to a container (snap.activeContainer, set by app/main.js's container:open)
+// — lets you add/remove references, trigger a reindex, and see cross-file
+// relationships without leaving the chat.
+
+function statusPillClass(status) {
+  return { indexed: 'ok', missing: 'fail', error: 'fail' }[status] || 'pending';
+}
+
+async function renderContainerStrip() {
+  const strip = $('#container-strip');
+  const container = snap?.activeContainer;
+  if (!container) { strip.classList.add('hidden'); return; }
+  strip.classList.remove('hidden');
+  $('#cs-name').textContent = container.name;
+  await refreshContainerRefs(container.id);
+}
+
+async function refreshContainerRefs(id) {
+  const status = await window.vc.getContainerStatus(id);
+  const body = $('#cs-refs');
+  const refs = status?.refs || [];
+  if (!refs.length) {
+    body.innerHTML = '<div class="cs-empty">No references yet — click "Add references" to pick files or folders anywhere on disk.</div>';
+    return;
+  }
+  body.innerHTML = refs.map((r) => `
+    <div class="cs-ref-row">
+      <span class="cs-ref-pill cs-ref-${statusPillClass(r.status)}">${escapeHtml(r.status)}</span>
+      <span class="cs-ref-path" title="${escapeHtml(r.path)}">${escapeHtml(r.path)}</span>
+      <button class="cs-ref-remove" data-ref="${r.ref_id}" title="Remove this reference (never deletes the file)">×</button>
+    </div>
+  `).join('');
+  body.querySelectorAll('.cs-ref-remove').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await window.vc.removeContainerRef(id, btn.dataset.ref);
+      await refreshContainerRefs(id);
+      loadContainerCaption(id);
+    });
+  });
+}
+
+async function refreshContainerRelationships(id) {
+  const rels = await window.vc.getContainerRelationships(id);
+  const body = $('#cs-relationships');
+  if (!rels.length) {
+    body.innerHTML = '<div class="cs-empty">No cross-references found yet — add files and reindex.</div>';
+    return;
+  }
+  body.innerHTML = rels.map((r) => `
+    <div class="cs-rel-row">
+      <span>${escapeHtml(r.fromTitle)}</span>
+      <span class="cs-rel-type">${escapeHtml(r.type)}</span>
+      <span>${escapeHtml(r.toTitle)}</span>
+    </div>
+  `).join('');
+}
+
+function setupContainerStrip() {
+  $('#cs-add-refs').addEventListener('click', async () => {
+    const container = snap?.activeContainer;
+    if (!container) return;
+    await window.vc.addContainerRefs(container.id);
+    await refreshContainerRefs(container.id);
+  });
+  $('#cs-reindex').addEventListener('click', async () => {
+    const container = snap?.activeContainer;
+    if (!container) return;
+    await window.vc.reindexContainer(container.id);
+    note('Reindexing started — check the Focus panel for progress.');
+  });
+  $$('.cs-tab').forEach((tab) => {
+    tab.addEventListener('click', async () => {
+      $$('.cs-tab').forEach((t) => t.classList.remove('active'));
+      tab.classList.add('active');
+      const which = tab.dataset.cstab;
+      $('#cs-refs').classList.toggle('hidden', which !== 'refs');
+      $('#cs-relationships').classList.toggle('hidden', which !== 'relationships');
+      const container = snap?.activeContainer;
+      if (container && which === 'relationships') await refreshContainerRelationships(container.id);
+    });
+  });
 }
 
 // ============================================================ wiring
@@ -1055,6 +1241,21 @@ function bind() {
   $('#desktop-add-btn').addEventListener('click', async () => {
     const s = await window.vc.addProject();
     if (s) { snap = s; renderDesktop(); }
+  });
+
+  $('#desktop-add-container-btn').addEventListener('click', async () => {
+    const name = prompt('Container name:');
+    if (!name || !name.trim()) return;
+    const s = await window.vc.createContainer(name.trim());
+    if (s) { snap = s; renderDesktop(); }
+  });
+
+  setupContainerStrip();
+
+  $('#desktop-view').addEventListener('contextmenu', (e) => {
+    if (e.target.closest('.desktop-icon')) return; // icons handle their own (delete)
+    e.preventDefault();
+    showDesktopContextMenu(e.clientX, e.clientY);
   });
 
   $$('#right-tabs button').forEach((btn) => {
@@ -1329,6 +1530,13 @@ function setupFocusEvents() {
     if (openFocusDetailId === session?.id) await refreshFocusDetail(session.id);
     else renderFocusPanel();
     note(`Focus ${session.id} ${status}: ${report?.slice(0, 200) || '(no report)'}`);
+    // A container indexing job just finished — refresh the open strip (if
+    // any container is currently open) and its desktop caption so the
+    // status pills/counts don't sit stale until the next manual action.
+    if (session?.role === 'indexer' && snap?.activeContainer) {
+      await refreshContainerRefs(snap.activeContainer.id);
+      loadContainerCaption(snap.activeContainer.id);
+    }
   });
   window.vc.onFocusLog?.(async ({ session, entry }) => {
     focusList = (await window.vc.getFocusList()) || [];

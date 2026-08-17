@@ -263,6 +263,7 @@ class FocusSession {
       onFileChange: (file, before, after) => toolCtx.onFileChange?.(file, before, after),
       onTodos: () => {},
       contextResolver: this.agentRefs.contextResolver,
+      activeTopicId: this.agentRefs.activeTopicId || null,
       onContextTrace: (trace) => toolCtx.onContextTrace?.(trace),
       agentKind: 'focus',
     }, { mcpServers, includeTask: false });
@@ -271,7 +272,7 @@ class FocusSession {
     let databaseContext = null;
     if (this.agentRefs.contextResolver) {
       try {
-        databaseContext = await this.agentRefs.contextResolver.resolve({ task: this.prompt, agentKind: 'focus' });
+        databaseContext = await this.agentRefs.contextResolver.resolve({ task: this.prompt, agentKind: 'focus', topicId: this.agentRefs.activeTopicId || null });
         toolCtx.onContextTrace?.(databaseContext.trace);
       } catch (err) {
         this.addLog(`context lookup failed: ${err.message}`);
@@ -732,6 +733,7 @@ class FocusManager {
       cwd: agentRefs.cwd,
       mcpServers: agentRefs.mcpServers,
       contextResolver: agentRefs.contextResolver || null,
+      activeTopicId: agentRefs.activeTopicId || null,
       toolCtx: null // will be set by Agent after toolCtx is created
     };
     this.sessions = new Map(); // id -> FocusSession
@@ -774,6 +776,37 @@ class FocusManager {
       session.finish(`Error: ${err.message}`, 'error');
     });
     return { id, description, minutes, model, role, mode };
+  }
+
+  // A deterministic sibling to spawn(): same session/log/status/getDetail
+  // machinery (so it shows up in the same Focus UI, drill-down included) but
+  // runs `runFn(session)` instead of the model-driven FocusSession.run()
+  // loop. For jobs where the STEPS are mechanical (walk a file list, hash,
+  // classify) and only specific sub-tasks need a model call — e.g. container
+  // indexing (src/containerIndexer.js) — not something an LLM should be
+  // freely tool-calling its way through.
+  spawnCustom({ description, role, mode = 'task', minutes = 30, runFn }) {
+    const deadlineMs = Math.max(1, minutes) * 60 * 1000;
+    const id = genId();
+    const session = new FocusSession({
+      id,
+      manager: this,
+      description,
+      prompt: description,
+      deadlineMs,
+      agentRefs: this.agentRefs,
+      role,
+      mode,
+    });
+    this.sessions.set(id, session);
+    this.emit('start', session);
+    Promise.resolve()
+      .then(() => runFn(session))
+      .catch((err) => {
+        session.addLog(`fatal error: ${err.message}`);
+        session.finish(`Error: ${err.message}`, 'error');
+      });
+    return { id, description, minutes, role, mode };
   }
 
   get(id) {

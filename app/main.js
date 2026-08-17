@@ -99,6 +99,8 @@ const voice = require('./voice');
 const { Scheduler } = require('../src/scheduler');
 const schedule = require('../src/schedule');
 const costTracker = require('../src/costTracker');
+const { createContextService } = require('../src/contextDb');
+const { indexContainer } = require('../src/containerIndexer');
 const portal = require('./portal');
 const { autoUpdater } = require('electron-updater');
 
@@ -251,6 +253,13 @@ function snapshot(provider) {
     cwd,
     home: os.homedir(),
     projects: cfg.appState?.projects || [],
+    containers: cfg.appState?.containers || [],
+    // Which container (if any) is the currently open session scoped to —
+    // lets the renderer show the ref-list/reindex management strip only
+    // when you've actually opened a container, not a plain project.
+    activeContainer: cfg.activeTopicId
+      ? (cfg.appState?.containers || []).find((c) => c.topicId === cfg.activeTopicId) || null
+      : null,
     provider: { name: provider.name, model: provider.model, hasKey: !!provider.apiKey },
     session: session ? { id: session.id, title: session.title, usage: session.usage } : null,
     projectCost: costTracker.load(cwd),
@@ -438,6 +447,24 @@ ipcMain.handle('media:chooseFolder', async () => {
 
 // ---------------------------------------------------------------- desktop shell projects
 
+// Grid used for both initial icon placement and drag-to-snap / arrange —
+// one shared definition so a freshly-added icon and a re-arranged one always
+// land on the exact same cell positions.
+const DESKTOP_GRID = { originX: 32, originY: 32, cellW: 104, cellH: 104 };
+function gridCell(index, cols) {
+  const c = Math.max(1, cols || 6);
+  return {
+    x: DESKTOP_GRID.originX + (index % c) * DESKTOP_GRID.cellW,
+    y: DESKTOP_GRID.originY + Math.floor(index / c) * DESKTOP_GRID.cellH,
+  };
+}
+// Nearest grid cell to an arbitrary dropped pixel position (snap-on-drop).
+function snapToGrid(x, y) {
+  const col = Math.max(0, Math.round((x - DESKTOP_GRID.originX) / DESKTOP_GRID.cellW));
+  const row = Math.max(0, Math.round((y - DESKTOP_GRID.originY) / DESKTOP_GRID.cellH));
+  return { x: DESKTOP_GRID.originX + col * DESKTOP_GRID.cellW, y: DESKTOP_GRID.originY + row * DESKTOP_GRID.cellH };
+}
+
 ipcMain.handle('project:add', async () => {
   const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath: cwd });
   if (res.canceled || !res.filePaths[0]) return null;
@@ -445,12 +472,14 @@ ipcMain.handle('project:add', async () => {
   const projects = cfg.appState.projects || [];
   if (!projects.some((p) => p.path === folder)) {
     const n = projects.length;
+    const pos = gridCell(n, 6);
     projects.push({
       id: crypto.randomUUID(),
       name: path.basename(folder) || folder,
       path: folder,
-      x: 32 + (n % 6) * 104,
-      y: 32 + Math.floor(n / 6) * 104,
+      createdAt: Date.now(),
+      x: pos.x,
+      y: pos.y,
     });
     config.saveGlobal({ appState: { projects } });
     cfg = config.load(cwd);
@@ -465,16 +494,225 @@ ipcMain.handle('project:remove', (e, id) => {
   return snapshot();
 });
 
+// Drag-to-snap: the renderer already resolves the drop to the nearest grid
+// cell for immediate visual feedback; snapping again here is defense in
+// depth so a position can never drift off-grid regardless of caller.
 ipcMain.handle('project:move', (e, { id, x, y }) => {
-  const projects = (cfg.appState.projects || []).map((p) => (p.id === id ? { ...p, x, y } : p));
+  const snapped = snapToGrid(x, y);
+  const projects = (cfg.appState.projects || []).map((p) => (p.id === id ? { ...p, x: snapped.x, y: snapped.y } : p));
   config.saveGlobal({ appState: { projects } });
   cfg = config.load(cwd);
+});
+
+// Windows-style "Arrange icons by" — re-lays-out every icon onto the grid in
+// sorted order. `cols` is supplied by the renderer (it knows the actual
+// desktop viewport width); missing createdAt on legacy projects sorts as
+// oldest rather than erroring or guessing a fake date.
+ipcMain.handle('project:arrange', (e, { by, cols }) => {
+  const projects = (cfg.appState.projects || []).slice();
+  const cmp = by === 'name'
+    ? (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    : (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
+  projects.sort(cmp);
+  const arranged = projects.map((p, i) => ({ ...p, ...gridCell(i, cols) }));
+  config.saveGlobal({ appState: { projects: arranged } });
+  cfg = config.load(cwd);
+  return snapshot();
 });
 
 ipcMain.handle('project:open', async (e, id) => {
   const proj = (cfg.appState.projects || []).find((p) => p.id === id);
   if (!proj || !fs.existsSync(proj.path)) return snapshot();
   return setWorkingFolder(proj.path);
+});
+
+// ---------------------------------------------------------------- containers
+// A container is a named collection of REFERENCES to files/folders that
+// already exist anywhere on disk — nothing is ever copied or moved. See the
+// approved container-feature plan. Each container gets its own scratch
+// folder (~/.voidcode/containers/<id>/) holding only its own context db
+// (container_refs + context_records/relationships, scoped by its own
+// topic_id) — never the referenced files themselves.
+
+const containersRoot = path.join(os.homedir(), '.voidcode', 'containers');
+const containerRepoCache = new Map(); // containerId -> ContextRepository, so repeated IPC calls reuse the same open db handle
+
+function findContainer(id) {
+  return (cfg.appState.containers || []).find((c) => c.id === id) || null;
+}
+
+function getContainerRepository(container) {
+  let repo = containerRepoCache.get(container.id);
+  if (!repo) {
+    const service = createContextService(cfg, container.cwd);
+    if (!service.repository) throw new Error('Context database is disabled — enable cfg.contextDb to use containers.');
+    repo = service.repository;
+    containerRepoCache.set(container.id, repo);
+  }
+  return repo;
+}
+
+// Recursively collects individual FILE paths under a directory (folders
+// themselves never become refs — this keeps hashing/status file-granular
+// even when the user only picked a folder). Skips symlinks (same guard the
+// corner media player's own folder scan uses) and is bounded so a huge
+// folder can't hang the picker.
+function collectFilesUnder(dir, out = [], limit = 5000) {
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const ent of entries) {
+    if (out.length >= limit) return out;
+    const full = path.join(dir, ent.name);
+    try { if (fs.lstatSync(full).isSymbolicLink()) continue; } catch { continue; }
+    if (ent.isDirectory()) collectFilesUnder(full, out, limit);
+    else if (ent.isFile()) out.push(full);
+  }
+  return out;
+}
+
+ipcMain.handle('container:create', async (e, { name }) => {
+  const id = crypto.randomUUID();
+  const scratchCwd = path.join(containersRoot, id);
+  fs.mkdirSync(scratchCwd, { recursive: true });
+  const service = createContextService(cfg, scratchCwd);
+  if (!service.repository) throw new Error('Context database is disabled — enable cfg.contextDb to use containers.');
+  await service.repository.initialize();
+  const topic = await service.repository.createTopic({ title: name || 'Untitled container' });
+  containerRepoCache.set(id, service.repository);
+
+  const containers = cfg.appState.containers || [];
+  const n = (cfg.appState.projects || []).length + containers.length;
+  const pos = gridCell(n, 6);
+  containers.push({
+    id, name: name || 'Untitled container', createdAt: Date.now(),
+    x: pos.x, y: pos.y, topicId: topic.topicId, cwd: scratchCwd,
+  });
+  config.saveGlobal({ appState: { containers } });
+  cfg = config.load(cwd);
+  return snapshot();
+});
+
+ipcMain.handle('container:addRefs', async (e, { id }) => {
+  const container = findContainer(id);
+  if (!container) return null;
+  const res = await dialog.showOpenDialog(win, { properties: ['openFile', 'openDirectory', 'multiSelections'] });
+  if (res.canceled || !res.filePaths.length) return { addedCount: 0 };
+
+  const repo = getContainerRepository(container);
+  const addedRefIds = [];
+  for (const p of res.filePaths) {
+    let isDir = false;
+    try { isDir = fs.statSync(p).isDirectory(); } catch { continue; }
+    const files = isDir ? collectFilesUnder(p) : [p];
+    for (const f of files) {
+      const ref = await repo.addContainerRef({ path: f, isDir: false });
+      addedRefIds.push(ref.ref_id);
+    }
+  }
+
+  // Auto-index just the newly added refs — everything else in the container
+  // is already indexed and unchanged, so there's no reason to re-scan it.
+  if (addedRefIds.length && agent) {
+    agent.focus.spawnCustom({
+      description: `index: ${container.name}`,
+      role: 'indexer',
+      runFn: (session) => indexContainer({ agent, repository: repo, topicId: container.topicId, session, refIds: addedRefIds }),
+    });
+  }
+  return { addedCount: addedRefIds.length };
+});
+
+ipcMain.handle('container:removeRef', async (e, { id, refId }) => {
+  const container = findContainer(id);
+  if (!container) return { ok: false };
+  const repo = getContainerRepository(container);
+  await repo.removeContainerRef(refId);
+  return { ok: true };
+});
+
+ipcMain.handle('container:reindex', (e, { id }) => {
+  const container = findContainer(id);
+  if (!container || !agent) return { ok: false };
+  const repo = getContainerRepository(container);
+  const { id: focusId } = agent.focus.spawnCustom({
+    description: `index: ${container.name}`,
+    role: 'indexer',
+    runFn: (session) => indexContainer({ agent, repository: repo, topicId: container.topicId, session }),
+  });
+  return { ok: true, focusId };
+});
+
+ipcMain.handle('container:open', async (e, id) => {
+  const container = findContainer(id);
+  if (!container) return snapshot();
+  cwd = container.cwd;
+  cfg = config.load(cwd);
+  cfg.activeTopicId = container.topicId;
+  session = new Session(cwd);
+  const provider = buildAgent();
+  return snapshot(provider);
+});
+
+ipcMain.handle('container:remove', (e, id) => {
+  const container = findContainer(id);
+  const containers = (cfg.appState.containers || []).filter((c) => c.id !== id);
+  config.saveGlobal({ appState: { containers } });
+  cfg = config.load(cwd);
+  // Only ever removes VoidCode's OWN derived index (the scratch folder it
+  // created) — never anything under a referenced path, which this code
+  // never writes to or deletes under any circumstance.
+  if (container) {
+    containerRepoCache.get(container.id)?.close?.();
+    containerRepoCache.delete(container.id);
+    try { fs.rmSync(container.cwd, { recursive: true, force: true }); } catch {}
+  }
+  return snapshot();
+});
+
+ipcMain.handle('container:move', (e, { id, x, y }) => {
+  const snapped = snapToGrid(x, y);
+  const containers = (cfg.appState.containers || []).map((c) => (c.id === id ? { ...c, x: snapped.x, y: snapped.y } : c));
+  config.saveGlobal({ appState: { containers } });
+  cfg = config.load(cwd);
+});
+
+ipcMain.handle('container:arrange', (e, { by, cols }) => {
+  const containers = (cfg.appState.containers || []).slice();
+  const cmp = by === 'name'
+    ? (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+    : (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
+  containers.sort(cmp);
+  const arranged = containers.map((c, i) => ({ ...c, ...gridCell(i, cols) }));
+  config.saveGlobal({ appState: { containers: arranged } });
+  cfg = config.load(cwd);
+  return snapshot();
+});
+
+ipcMain.handle('container:status', async (e, id) => {
+  const container = findContainer(id);
+  if (!container) return null;
+  const repo = getContainerRepository(container);
+  const refs = await repo.listContainerRefs();
+  const counts = { total: refs.length, indexed: 0, stale: 0, missing: 0, error: 0, pending: 0 };
+  for (const r of refs) counts[r.status] = (counts[r.status] || 0) + 1;
+  return { refs, counts };
+});
+
+ipcMain.handle('container:relationships', async (e, id) => {
+  const container = findContainer(id);
+  if (!container) return [];
+  const repo = getContainerRepository(container);
+  const records = await repo.list({ topicId: container.topicId, limit: 500 });
+  const byId = new Map(records.map((r) => [r.record_id, r.title]));
+  const relIds = new Set(records.map((r) => r.record_id));
+  const all = await repo.driver.relationshipsFor(records);
+  return all
+    .filter((rel) => relIds.has(rel.from_record_id) && relIds.has(rel.to_record_id))
+    .map((rel) => ({
+      fromTitle: byId.get(rel.from_record_id) || rel.from_record_id,
+      toTitle: byId.get(rel.to_record_id) || rel.to_record_id,
+      type: rel.relationship_type,
+    }));
 });
 
 ipcMain.handle('chat:send', (e, input) => runChat(input));

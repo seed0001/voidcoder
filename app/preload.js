@@ -14,7 +14,19 @@ contextBridge.exposeInMainWorld('vc', {
   addProject: () => ipcRenderer.invoke('project:add'),
   removeProject: (id) => ipcRenderer.invoke('project:remove', id),
   moveProject: (id, x, y) => ipcRenderer.invoke('project:move', { id, x, y }),
+  arrangeProjects: (by, cols) => ipcRenderer.invoke('project:arrange', { by, cols }),
   openProject: (id) => ipcRenderer.invoke('project:open', id),
+
+  createContainer: (name) => ipcRenderer.invoke('container:create', { name }),
+  addContainerRefs: (id) => ipcRenderer.invoke('container:addRefs', { id }),
+  removeContainerRef: (id, refId) => ipcRenderer.invoke('container:removeRef', { id, refId }),
+  reindexContainer: (id) => ipcRenderer.invoke('container:reindex', { id }),
+  openContainer: (id) => ipcRenderer.invoke('container:open', id),
+  removeContainer: (id) => ipcRenderer.invoke('container:remove', id),
+  moveContainer: (id, x, y) => ipcRenderer.invoke('container:move', { id, x, y }),
+  arrangeContainers: (by, cols) => ipcRenderer.invoke('container:arrange', { by, cols }),
+  getContainerStatus: (id) => ipcRenderer.invoke('container:status', id),
+  getContainerRelationships: (id) => ipcRenderer.invoke('container:relationships', id),
 
   chooseMediaFolder: () => ipcRenderer.invoke('media:chooseFolder'),
 

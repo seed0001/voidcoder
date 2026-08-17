@@ -99,7 +99,11 @@ function makeExecutors(ctx) {
     context_query: async ({ query, topic_id, kinds = [], limit } = {}) => {
       if (!ctx.contextResolver) return 'Context database is disabled or unconfigured.';
       try {
-        const pkg = await ctx.contextResolver.resolve({ task: query, agentKind: ctx.agentKind || 'main', budgetTokens: ctx.contextBudgetTokens, kinds, topicId: topic_id, maxRecords: limit });
+        // An explicit topic_id from the model always wins; otherwise default
+        // to whatever container/topic is currently active (see Agent.setActiveTopic),
+        // so a scoped session's manual queries stay scoped too, not just its
+        // automatic per-turn context injection.
+        const pkg = await ctx.contextResolver.resolve({ task: query, agentKind: ctx.agentKind || 'main', budgetTokens: ctx.contextBudgetTokens, kinds, topicId: topic_id || ctx.activeTopicId || null, maxRecords: limit });
         ctx.onContextTrace?.(pkg.trace);
         return JSON.stringify(pkg, null, 2);
       } catch (err) {

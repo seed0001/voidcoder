@@ -101,7 +101,7 @@ const DEFAULTS = {
       sapi: { voice: '' },
     },
   },
-  appState: { lastCwd: '', projects: [] }, // desktop app: last working folder + desktop shell project icons
+  appState: { lastCwd: '', projects: [], containers: [] }, // desktop app: last working folder + desktop shell project/container icons
   // Desktop appearance (renderer only). Unknown theme ids fall back to 'void'.
   ui: {
     theme: 'void',   // void | ember | mono | violet

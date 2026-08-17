@@ -115,6 +115,30 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
   font-size: 12px; line-height: 1.25; max-width: 100%;
   overflow-wrap: break-word; word-break: break-word;
 }
+.desktop-icon-container svg { stroke: #a078ff; }
+.dicon-caption { font-size: 10px !important; color: var(--faint); }
+.desktop-ctx-menu {
+  position: fixed;
+  z-index: 500;
+  min-width: 160px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  padding: 4px;
+  display: flex; flex-direction: column;
+}
+.desktop-ctx-menu .dcm-label {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+  color: var(--faint); padding: 6px 10px 4px;
+}
+.desktop-ctx-menu button {
+  background: none; border: none; text-align: left;
+  color: var(--text); font: inherit; font-size: 13px;
+  padding: 7px 10px; border-radius: 4px; cursor: pointer;
+}
+.desktop-ctx-menu button:hover { background: var(--accent-soft); color: var(--accent); }
+
 #desktop-add-btn {
   position: absolute; top: 20px; right: 20px;
   display: flex; align-items: center; gap: 6px;
@@ -124,6 +148,66 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 #desktop-add-btn:hover { border-color: var(--accent); }
 #desktop-add-btn svg { stroke: var(--dim); }
 #desktop-add-btn:hover svg { stroke: var(--accent); }
+
+#desktop-add-container-btn {
+  position: absolute; top: 20px; right: 172px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border-radius: 4px; background: var(--bg2);
+  border: 1px solid var(--border); font-size: 13px; color: var(--text);
+}
+#desktop-add-container-btn:hover { border-color: #a078ff; }
+#desktop-add-container-btn svg { stroke: var(--dim); }
+#desktop-add-container-btn:hover svg { stroke: #a078ff; }
+
+/* ---------------- container management strip ---------------- */
+#container-strip {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 10px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.cs-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.cs-name { font-weight: 600; font-size: 13px; color: var(--text); }
+.cs-actions { display: flex; gap: 6px; }
+.cs-actions button {
+  background: var(--bg1); border: 1px solid var(--border); border-radius: 4px;
+  padding: 5px 10px; font-size: 12px; color: var(--text); cursor: pointer;
+}
+.cs-actions button:hover { border-color: #a078ff; color: #a078ff; }
+.cs-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.cs-tab {
+  background: none; border: none; border-bottom: 2px solid transparent;
+  padding: 6px 8px; font-size: 12px; color: var(--dim); cursor: pointer;
+}
+.cs-tab.active { color: #a078ff; border-bottom-color: #a078ff; }
+.cs-body { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.cs-empty { color: var(--faint); font-size: 12px; padding: 8px 0; }
+.cs-ref-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 4px;
+}
+.cs-ref-row:hover { background: var(--bg1); }
+.cs-ref-pill {
+  font-size: 9px; text-transform: uppercase; font-weight: 600; letter-spacing: 0.03em;
+  padding: 1px 6px; border-radius: 3px; flex-shrink: 0;
+}
+.cs-ref-pill.cs-ref-ok { background: rgba(76,175,80,0.18); color: var(--green); }
+.cs-ref-pill.cs-ref-pending { background: var(--accent-soft); color: var(--accent); }
+.cs-ref-pill.cs-ref-fail { background: rgba(239,106,106,0.15); color: var(--red); }
+.cs-ref-path {
+  flex: 1; font-size: 12px; color: var(--text); font-family: monospace;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cs-ref-remove {
+  background: none; border: none; color: var(--faint); cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 2px 4px; flex-shrink: 0;
+}
+.cs-ref-remove:hover { color: var(--red); }
+.cs-rel-row {
+  display: flex; align-items: center; gap: 8px; font-size: 12px;
+  padding: 4px 6px; color: var(--text);
+}
+.cs-rel-type { color: #a078ff; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
 
 /* ---------------- top bar ---------------- */
 #topbar {
@@ -712,7 +796,7 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 /* ---------------- quiet motion ---------------- */
 #project-btn, #new-session, #settings-btn, .cbtn, .session-item,
 #model-select-btn, .portal-btn, #input, .sched-card .sc-actions button,
-#home-btn, #desktop-add-btn, .desktop-icon {
+#home-btn, #desktop-add-btn, #desktop-add-container-btn, .desktop-icon {
   transition: border-color var(--ease), color var(--ease), background var(--ease);
 }
 #right-tabs button { transition: color var(--ease), border-color var(--ease); }

@@ -14,6 +14,10 @@
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
       Add project
     </button>
+    <button id="desktop-add-container-btn" title="New container — group references to files/folders anywhere on disk">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New container
+    </button>
   </div>
 
   <header id="topbar">
@@ -44,6 +48,21 @@
     </aside>
 
     <main id="chat-col">
+      <div id="container-strip" class="hidden">
+        <div class="cs-header">
+          <span class="cs-name" id="cs-name"></span>
+          <div class="cs-actions">
+            <button id="cs-add-refs">+ Add references</button>
+            <button id="cs-reindex">Reindex</button>
+          </div>
+        </div>
+        <div class="cs-tabs">
+          <button class="cs-tab active" data-cstab="refs">References</button>
+          <button class="cs-tab" data-cstab="relationships">Relationships</button>
+        </div>
+        <div class="cs-body" id="cs-refs"></div>
+        <div class="cs-body hidden" id="cs-relationships"></div>
+      </div>
       <div id="chat"></div>
       <div id="pacer" class="hidden" aria-hidden="true">
         <div id="pacer-floor"></div>

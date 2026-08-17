@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const DEFAULT_LIMIT = 40;
 const DEFAULT_BUDGET_TOKENS = 6000;
 
@@ -46,6 +46,20 @@ CREATE TABLE IF NOT EXISTS context_record_versions (
   record_id TEXT NOT NULL, version TEXT NOT NULL, supersedes_version TEXT,
   created_at TEXT NOT NULL, PRIMARY KEY (record_id, version)
 );
+CREATE TABLE IF NOT EXISTS container_refs (
+  ref_id TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  is_dir INTEGER NOT NULL DEFAULT 0,
+  added_at TEXT NOT NULL,
+  last_indexed_at TEXT,
+  content_hash TEXT,
+  mtime_ms INTEGER,
+  record_id TEXT,
+  tier TEXT,
+  status TEXT NOT NULL DEFAULT 'pending',
+  last_error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_container_refs_status ON container_refs(status);
 INSERT OR REPLACE INTO context_meta(key, value) VALUES ('schema_version', '${SCHEMA_VERSION}');
 `;
 
@@ -287,6 +301,61 @@ class SqlJsDriver {
     this._persist();
     return this._get('SELECT changes() AS changes')?.changes ?? 0;
   }
+
+  // ---- container refs (see src/containerIndexer.js) ----
+  // One row per referenced file/folder in a container. Never holds file
+  // content — content lives in context_records (record_id links the two).
+  // This table exists purely to track identity/change-detection (path,
+  // content_hash, mtime_ms) and indexing status, since nothing else in this
+  // codebase tracks "have I seen this exact file content before".
+
+  addContainerRef({ path: refPath, isDir = false }) {
+    required(refPath, 'path');
+    const existing = this._get('SELECT * FROM container_refs WHERE path = ?', [refPath]);
+    if (existing) return existing;
+    const refId = crypto.randomUUID();
+    this._run(
+      'INSERT INTO container_refs(ref_id, path, is_dir, added_at, status) VALUES (?, ?, ?, ?, ?)',
+      [refId, refPath, isDir ? 1 : 0, now(), 'pending']
+    );
+    this._persist();
+    return this._get('SELECT * FROM container_refs WHERE ref_id = ?', [refId]);
+  }
+
+  listContainerRefs({ status } = {}) {
+    if (status) return this._all('SELECT * FROM container_refs WHERE status = ? ORDER BY added_at ASC', [status]);
+    return this._all('SELECT * FROM container_refs ORDER BY added_at ASC');
+  }
+
+  getContainerRef(refId) {
+    return this._get('SELECT * FROM container_refs WHERE ref_id = ?', [refId]) || null;
+  }
+
+  updateContainerRef(refId, patch = {}) {
+    required(refId, 'refId');
+    const fields = ['content_hash', 'mtime_ms', 'record_id', 'tier', 'status', 'last_error', 'last_indexed_at'];
+    const sets = [];
+    const params = [];
+    for (const f of fields) {
+      if (!(f in patch)) continue;
+      sets.push(`${f} = ?`);
+      params.push(patch[f]);
+    }
+    if (!sets.length) return this.getContainerRef(refId);
+    params.push(refId);
+    this._run(`UPDATE container_refs SET ${sets.join(', ')} WHERE ref_id = ?`, params);
+    this._persist();
+    return this.getContainerRef(refId);
+  }
+
+  removeContainerRef(refId) {
+    required(refId, 'refId');
+    const ref = this.getContainerRef(refId);
+    if (ref?.record_id) this.remove(ref.record_id);
+    this._run('DELETE FROM container_refs WHERE ref_id = ?', [refId]);
+    this._persist();
+    return true;
+  }
 }
 
 // Backward-compat alias for existing imports/tests.
@@ -345,6 +414,13 @@ class ContextRepository {
   async createTopic(opts) { await this.initialize(); const result = this.driver.createTopic(opts); this.invalidate(); return result; }
   async listTopics() { await this.initialize(); return this.driver.listTopics(); }
   async deleteTopic(topicId) { await this.initialize(); const result = this.driver.deleteTopic(topicId); this.invalidate(); return result; }
+
+  async addContainerRef(ref) { await this.initialize(); return this.driver.addContainerRef(ref); }
+  async listContainerRefs(options) { await this.initialize(); return this.driver.listContainerRefs(options); }
+  async getContainerRef(refId) { await this.initialize(); return this.driver.getContainerRef(refId); }
+  async updateContainerRef(refId, patch) { await this.initialize(); const result = this.driver.updateContainerRef(refId, patch); this.invalidate(); return result; }
+  async removeContainerRef(refId) { await this.initialize(); const result = this.driver.removeContainerRef(refId); this.invalidate(); return result; }
+
   close() { this.driver?.close?.(); }
 }
 

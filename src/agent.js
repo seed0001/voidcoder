@@ -41,6 +41,14 @@ class Agent {
     this.suggestFailoverModelFn = suggestFailoverModelFn || require('./modelCatalog').suggestFailoverModel;
     this.abort = null;
     this.cwd = cwd;
+    // When set (opening a container — see src/containerIndexer.js), scopes
+    // every automatic context-db injection to just that container's topic
+    // instead of the whole per-project database. null = today's unscoped
+    // behavior, unchanged. Read fresh on every resolveContext() call, so a
+    // plain field mutation (see setActiveTopic below) is enough to retarget
+    // an already-constructed Agent — no rebuild, no cache invalidation
+    // needed since ContextRepository's cache key already hashes topicId.
+    this.activeTopicId = cfg.activeTopicId || null;
     // Optional SQL context service — must never take down the agent if the
     // database driver can't load (missing dependency, corrupt file, etc.).
     try {
@@ -66,6 +74,7 @@ class Agent {
       cwd,
       mcpServers,
       contextResolver: this.contextResolver,
+      activeTopicId: this.activeTopicId,
       toolCtx: null
     });
     this.focus.onEvent((event, ...args) => {
@@ -88,6 +97,7 @@ class Agent {
       shellCwd: cwd,
       cfg: this.cfg,
       provider,
+      activeTopicId: this.activeTopicId,
       onFileChange: (file, before, after) => {
         this.session.recordFileChange(file, before, after);
         this.events.onFileChange?.(file, before, after);
@@ -118,7 +128,7 @@ class Agent {
     this.events.onContextTrace?.(trace);
   }
 
-  async resolveContext(task, agentKind = 'main') {
+  async resolveContext(task, agentKind = 'main', topicId = this.activeTopicId) {
     if (!this.contextResolver) return null;
     if (!this.contextInitialized) {
       try { await this.contextService.repository.initialize(); }
@@ -130,7 +140,7 @@ class Agent {
       }
       this.contextInitialized = true;
     }
-    const pkg = await this.contextResolver.resolve({ task, agentKind });
+    const pkg = await this.contextResolver.resolve({ task, agentKind, topicId });
     this.recordContextTrace(pkg.trace);
     return pkg;
   }
@@ -215,6 +225,19 @@ class Agent {
     return { ok: true, provider: newProvider, id: modelId };
   }
 
+  // Scope (or unscope, with null) automatic context-db injection to one
+  // topic — used when opening/closing a container. Also updates the focus
+  // manager's shared agentRefs so background focus sessions spawned after
+  // this call (e.g. a container reindex) inherit the same scope.
+  setActiveTopic(topicId) {
+    this.activeTopicId = topicId || null;
+    this.focus.agentRefs.activeTopicId = this.activeTopicId;
+    // toolCtx was copied at construction time (a primitive field, not a
+    // reference) — mutate it in place too, or the context_query tool would
+    // keep using whatever topic was active when the Agent was built.
+    this.toolCtx.activeTopicId = this.activeTopicId;
+  }
+
   stop() {
     this.abort?.abort();
   }
@@ -291,6 +314,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       onFileChange: this.toolCtx.onFileChange,
       onTodos: () => { },
       contextResolver: this.contextResolver,
+      activeTopicId: this.activeTopicId,
       onContextTrace: (trace) => this.recordContextTrace(trace),
       agentKind: 'subagent',
     }, { mcpServers: this.mcpServers, includeTask: false, includeFocus: false });
