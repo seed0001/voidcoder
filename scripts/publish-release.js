@@ -30,6 +30,13 @@ const crypto = require('crypto');
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist');
 
+// No shell by default: git.exe and gh.exe are real Windows executables, and
+// running them through a shell needlessly risks the shell re-splitting any
+// argument that happens to contain a space (hit exactly this: an unquoted
+// multi-word --notes value got tokenized into extra bare args, one of which
+// gh then tried to glob-match as an asset filename and failed). npx IS a
+// .cmd shim on Windows though — execFileSync can't spawn that directly
+// without a shell (the ENOENT the very first run hit) — so it opts in below.
 function run(cmd, args, opts = {}) {
   console.log(`  $ ${cmd} ${args.join(' ')}`);
   return execFileSync(cmd, args, { stdio: 'inherit', cwd: ROOT, ...opts });
@@ -64,7 +71,7 @@ function main() {
   }
 
   console.log('-- Building (local only — electron-builder never touches the GitHub API) --');
-  run('npx', ['electron-builder', '--publish', 'never']);
+  run('npx', ['electron-builder', '--publish', 'never'], { shell: true });
 
   if (!fs.existsSync(exePath)) {
     console.error(`\n✗ Expected build output not found: ${exePath}`);
