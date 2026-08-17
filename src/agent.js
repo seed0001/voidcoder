@@ -26,7 +26,7 @@ function isTransientNetError(err) {
 }
 
 class Agent {
-  constructor({ cfg, provider, session, permissions, mcpServers = [], events = {}, cwd = process.cwd(), streamChatFn = null }) {
+  constructor({ cfg, provider, session, permissions, mcpServers = [], events = {}, cwd = process.cwd(), streamChatFn = null, suggestFailoverModelFn = null }) {
     this.cfg = cfg;
     this.provider = provider;
     this.session = session;
@@ -36,6 +36,9 @@ class Agent {
     // events: onDelta, onToolStart, onToolEnd, onTodos, onStatus, onSubagentStart, onSubagentEnd
     this.events = events;
     this.streamChatFn = streamChatFn || streamChat;
+    // Overridable for tests (avoids a live OpenRouter catalog fetch) — see
+    // the model-collapse recovery block in _loop().
+    this.suggestFailoverModelFn = suggestFailoverModelFn || require('./modelCatalog').suggestFailoverModel;
     this.abort = null;
     this.cwd = cwd;
     // Optional SQL context service — must never take down the agent if the
@@ -463,7 +466,8 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
     const prevAbort = this.abort;
     const abort = (this.abort = new AbortController());
     // This loop's provider: a worker/subagent override, or the chat provider.
-    const prov = provider || this.provider;
+    // Reassignable — a detected model collapse (see below) swaps it mid-loop.
+    let prov = provider || this.provider;
     const showTools = !quiet || !!streamTools;
     let finalText = '';
     let proseNudges = 0;
@@ -481,6 +485,15 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
     let emptyRetries = 0;
     let pendingContinuation = null;
     const MAX_EMPTY_RETRIES = 2;
+
+    // Model-collapse recovery (see guardrails.detectRepetitionCollapse):
+    // models this _loop invocation has already caught degenerating, so a
+    // failover never suggests the same bad model twice, and a bound on how
+    // many times we'll swap models in one turn rather than flailing forever
+    // if several sibling models are all unhealthy.
+    const collapsedModelIds = new Set();
+    let collapseRetries = 0;
+    const MAX_COLLAPSE_RETRIES = 2;
 
     // Digital-organism mode: establish a per-task spending budget and a loop
     // guard ONCE per _loop invocation. Every model round below feeds it, and it
@@ -641,6 +654,66 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
             if (err.organismBudgetStop || /Insufficient treasury balance/.test(err.message)) throw err;
             // Transient (e.g. catalog/pricing fetch failed) — don't stop the loop.
           }
+        }
+      }
+
+      // Model collapse detection: some models occasionally degenerate into a
+      // tight loop over a handful of words/phrases (sometimes drifting into
+      // a language unrelated to the conversation) instead of a real answer —
+      // a sampling/provider fault, not a real turn. Treat it as one: switch
+      // to a similarly-priced sibling model on the same provider and retry
+      // this round, rather than persisting the garbage or continuing to
+      // spend on a model that just proved broken.
+      if (typeof result.content === 'string' && result.content) {
+        const collapse = guardrails.detectRepetitionCollapse(result.content);
+        if (collapse) {
+          const failedId = `${prov.name}/${prov.model}`;
+          collapsedModelIds.add(failedId);
+          const detail = collapse.kind === 'vocabulary'
+            ? `only ${collapse.uniqueWords} unique words across ${collapse.totalWords}`
+            : `"${collapse.gram}" repeated ${collapse.count}x`;
+          if (showTools) this.events.onStatus?.(`model collapse on ${failedId} (${detail}) — looking for a similarly-priced alternative…`);
+          try {
+            guardrails.recordLesson({
+              title: `${failedId} output collapse`,
+              trigger: failedId,
+              behavior: 'This model has degenerated into repetitive garbage output before under this harness. Prefer switching to an alternate model of similar cost if it happens again.',
+              category: 'all',
+              maxLearnings: this.cfg.guardrails?.maxLearnings || 30,
+            });
+          } catch { /* best-effort */ }
+
+          let switched = false;
+          if (collapseRetries < MAX_COLLAPSE_RETRIES) {
+            collapseRetries++;
+            try {
+              const alt = await this.suggestFailoverModelFn(this.cfg, this.toolCtx.cwd, failedId, { excludeIds: [...collapsedModelIds] });
+              if (alt) {
+                const altId = `${alt.provider}/${alt.modelName}`;
+                const { resolveProvider, saveGlobal } = require('./config');
+                const altProvider = resolveProvider(this.cfg, altId);
+                prov = altProvider;
+                switched = true;
+                // Main chat-side turn only (no explicit worker/subagent
+                // override) — make the swap stick for the rest of the
+                // session too. A subagent/worker/focus collapse should not
+                // silently change the user's own main model.
+                if (!provider) {
+                  this.provider = altProvider;
+                  try { saveGlobal({ provider: altProvider.name, model: altProvider.model }); } catch { /* best-effort */ }
+                }
+                if (showTools) this.events.onStatus?.(`switched to ${altId} after model collapse — retrying…`);
+              } else if (showTools) {
+                this.events.onStatus?.(`no alternate model available in ${failedId}'s price range; continuing on the same model.`);
+              }
+            } catch (err) {
+              if (showTools) this.events.onStatus?.(`could not switch models after collapse: ${err.message}`);
+            }
+          }
+          if (switched) continue; // retry this round on the new model
+          // Retries exhausted or no alternate found: fall through and treat
+          // the collapsed text as this round's answer rather than looping
+          // forever chasing a replacement that isn't there.
         }
       }
 

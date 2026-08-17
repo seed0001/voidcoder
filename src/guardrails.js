@@ -95,6 +95,70 @@ function detectForeignScript(text) {
   return null;
 }
 
+// Detect a degenerate repetition collapse — some models occasionally fall
+// into a tight loop over a tiny handful of words/phrases, shuffled and
+// recombined rather than one fixed string repeating verbatim (sometimes
+// drifting into a language unrelated to the conversation, as observed with
+// certain OpenRouter models under specific quantizations). This is a
+// sampling/provider fault, not real prose, and is language-agnostic by
+// design — unlike detectForeignScript above, which only flags a SCRIPT
+// change (Cyrillic/Arabic/etc.), not a same-script language collapse like
+// French, and unlike naive exact-phrase matching, which misses a collapse
+// that keeps reshuffling its small vocabulary into slightly different
+// phrase orders (observed in practice — no single fixed n-gram repeats
+// often enough on its own to catch it).
+//
+// Two complementary signals, either one is sufficient:
+//   1. Vocabulary collapse — real prose in any language draws on a varied
+//      vocabulary; a collapse loops a tiny word set. Measured as the
+//      type-token ratio (unique words / total words) over a long enough
+//      sample that a naturally short vocabulary (a short reply, a code
+//      block) can't false-positive.
+//   2. Exact-phrase looping — the same sentence/phrase repeating verbatim
+//      many times, even when the surrounding vocabulary still looks
+//      moderately varied.
+//
+// Returns a detail object when a collapse is detected, otherwise null.
+// Deliberately conservative on both signals — real long-form answers can
+// legitimately reuse words/short phrases; this requires the repetition to
+// dominate the sample, not just appear in it.
+function detectRepetitionCollapse(text, {
+  minWords = 60,
+  minVocabWords = 100,
+  maxTypeTokenRatio = 0.20,
+  gramSize = 3,
+  minGramCount = 8,
+  minGramRatio = 0.10,
+} = {}) {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean);
+  if (words.length < minWords) return null;
+  const lower = words.map((w) => w.toLowerCase());
+
+  if (words.length >= minVocabWords) {
+    const uniqueWords = new Set(lower).size;
+    const ratio = uniqueWords / words.length;
+    if (ratio <= maxTypeTokenRatio) {
+      return { kind: 'vocabulary', ratio, uniqueWords, totalWords: words.length };
+    }
+  }
+
+  const counts = new Map();
+  const totalGrams = lower.length - gramSize + 1;
+  for (let i = 0; i < totalGrams; i++) {
+    const gram = lower.slice(i, i + gramSize).join(' ');
+    counts.set(gram, (counts.get(gram) || 0) + 1);
+  }
+  let maxGram = '', maxCount = 0;
+  for (const [gram, count] of counts) {
+    if (count > maxCount) { maxGram = gram; maxCount = count; }
+  }
+  const ratio = totalGrams > 0 ? maxCount / totalGrams : 0;
+  if (maxCount >= minGramCount && ratio >= minGramRatio) {
+    return { kind: 'phrase', gram: maxGram, count: maxCount, ratio, totalWords: words.length };
+  }
+  return null;
+}
+
 // ---- learning memory (if trigger then behavior) ----------------------------
 
 function learningsPath() {
@@ -550,6 +614,7 @@ module.exports = {
   toolOutcome,
   zeroHitStreak,
   detectForeignScript,
+  detectRepetitionCollapse,
   recordLesson,
   listLessons,
   setStorePath,

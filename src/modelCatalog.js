@@ -274,4 +274,30 @@ function estimateCost(model, usage = {}) {
   };
 }
 
-module.exports = { discoverModels, findModels: searchModels, resolveModelString, resolveModelRef, familyOf, classifyTier, sortByCost, sortByRecency, groupByTier, estimateCost };
+// Suggest a same-provider, similarly-priced replacement for a model that
+// just misbehaved (e.g. a repetition collapse — see guardrails.js
+// detectRepetitionCollapse). Restricted to the SAME provider as the failed
+// model so the existing configured API key is guaranteed to work — we never
+// guess at whether some other provider's key is even set. Prefers a model in
+// the same cost tier (free/economy/average/premium); if none is left after
+// exclusions, falls back to the closest per-token price of any tier rather
+// than refusing to suggest anything.
+async function suggestFailoverModel(cfg, cwd, failedModelId, { excludeIds = [], models: modelsOverride = null } = {}) {
+  const models = modelsOverride || await discoverModels(cfg, cwd);
+  const failed = models.find((m) => m.id === failedModelId);
+  const exclude = new Set([failedModelId, ...excludeIds]);
+
+  let pool = models.filter((m) => !exclude.has(m.id));
+  if (failed) pool = pool.filter((m) => m.provider === failed.provider);
+  if (!pool.length) return null;
+
+  const priceOf = (m) => (m.pricing?.prompt || 0) + (m.pricing?.completion || 0);
+  const failedPrice = failed ? priceOf(failed) : 0;
+  const sameTier = failed ? pool.filter((m) => m.costTier === failed.costTier) : pool;
+  const candidates = sameTier.length ? sameTier : pool;
+
+  candidates.sort((a, b) => Math.abs(priceOf(a) - failedPrice) - Math.abs(priceOf(b) - failedPrice));
+  return candidates[0] || null;
+}
+
+module.exports = { discoverModels, findModels: searchModels, resolveModelString, resolveModelRef, familyOf, classifyTier, sortByCost, sortByRecency, groupByTier, estimateCost, suggestFailoverModel };

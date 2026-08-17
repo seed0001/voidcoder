@@ -217,7 +217,7 @@ class FocusSession {
   }
 
   async run() {
-    const { provider, cfg, cwd, mcpServers, toolCtx } = this.agentRefs;
+    const { provider, cfg, cwd, mcpServers, toolCtx, suggestFailoverModelFn } = this.agentRefs;
 
     // Digital-organism mode: focus sessions draw from the shared treasury and
     // are bounded by the same per-task budget rules as the main agent. When
@@ -308,6 +308,14 @@ class FocusSession {
     };
 
     let useTools = subTools;
+    // Reassignable — a detected model collapse (see below) swaps it mid-loop
+    // without touching this.agentRefs.provider (the shared main-agent
+    // provider), so a background session's collapse can't silently change
+    // the user's own main model.
+    let activeProvider = sessionProvider;
+    const collapsedModelIds = new Set();
+    let collapseRetries = 0;
+    const MAX_COLLAPSE_RETRIES = 2;
     const roundLimit = this.untilDeadline ? RESEARCH_MAX_ROUNDS : MAX_ROUNDS;
     for (let round = 0; round < roundLimit; round++) {
       if (this.abort.signal.aborted) {
@@ -319,7 +327,7 @@ class FocusSession {
         // one more round to allow final answer
       }
 
-      const turnProvider = this.modelOverride ? sessionProvider : this.agentRefs.provider;
+      const turnProvider = activeProvider;
 
       // Update scratchpad every 3 rounds (or if empty and we have history)
       if (this.messages.length >= 2 && (round % 3 === 0 || !this.scratchpad)) {
@@ -335,7 +343,7 @@ class FocusSession {
         subagent: true,
         focus: { id: this.id, description: this.description, minutes: this.remainingMin || 30, mode: this.mode },
         scratchpad: this.scratchpad,
-        contextTokens: turnProvider.contextTokens || this.cfg.contextTokens,
+        contextTokens: turnProvider.contextTokens || cfg.contextTokens,
         databaseContext
       });
 
@@ -488,6 +496,60 @@ class FocusSession {
             break;
           }
           // Transient failures (catalog fetch, etc.) should not kill the loop.
+        }
+      }
+
+      // Model collapse detection: some models occasionally degenerate into a
+      // tight loop over a handful of words/phrases instead of a real answer
+      // — a sampling/provider fault, not real progress. Switch to a
+      // similarly-priced sibling model on the same provider and retry this
+      // round rather than burning the rest of the session's time/credit
+      // budget on a model that just proved broken — this matters even more
+      // here than for an interactive turn, since a background session runs
+      // unattended for its full deadline with nobody watching it loop.
+      if (typeof result.content === 'string' && result.content) {
+        const collapse = guardrails.detectRepetitionCollapse(result.content);
+        if (collapse) {
+          const failedId = `${turnProvider.name}/${turnProvider.model}`;
+          collapsedModelIds.add(failedId);
+          const detail = collapse.kind === 'vocabulary'
+            ? `only ${collapse.uniqueWords} unique words across ${collapse.totalWords}`
+            : `"${collapse.gram}" repeated ${collapse.count}x`;
+          this.addLog({ kind: 'note', text: `model collapse on ${failedId} (${detail}) — looking for a similarly-priced alternative…` });
+          try {
+            guardrails.recordLesson({
+              title: `${failedId} output collapse`,
+              trigger: failedId,
+              behavior: 'This model has degenerated into repetitive garbage output before under this harness. Prefer switching to an alternate model of similar cost if it happens again.',
+              category: 'all',
+              maxLearnings: (cfg.guardrails && cfg.guardrails.maxLearnings) || 30,
+            });
+          } catch { /* best-effort */ }
+
+          let switched = false;
+          if (collapseRetries < MAX_COLLAPSE_RETRIES) {
+            collapseRetries++;
+            try {
+              const failoverFn = suggestFailoverModelFn || require('./modelCatalog').suggestFailoverModel;
+              const alt = await failoverFn(cfg, cwd, failedId, { excludeIds: [...collapsedModelIds] });
+              if (alt) {
+                const altId = `${alt.provider}/${alt.modelName}`;
+                const { resolveProvider } = require('./config');
+                activeProvider = resolveProvider(cfg, altId);
+                this.modelOverride = altId;
+                switched = true;
+                this.addLog({ kind: 'note', text: `switched to ${altId} after model collapse — retrying…` });
+              } else {
+                this.addLog({ kind: 'note', text: `no alternate model available in ${failedId}'s price range; continuing on the same model.` });
+              }
+            } catch (err) {
+              this.addLog({ kind: 'note', text: `could not switch models after collapse: ${err.message}` });
+            }
+          }
+          if (switched) { round--; continue; }
+          // Retries exhausted or no alternate found: fall through and treat
+          // the collapsed text as this round's answer/report rather than
+          // looping forever chasing a replacement that isn't there.
         }
       }
 
