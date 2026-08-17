@@ -613,12 +613,24 @@ async function main() {
     const cwd = mkTmp('voidcode-cont-focus-');
 
     let requestCount = 0;
+    let scratchpadCalls = 0;
     const requests = [];
     const server = http.createServer((req, res) => {
       let body = '';
       req.on('data', (d) => { body += d; });
       req.on('end', () => {
         const payload = JSON.parse(body);
+        if (payload.stream === false) {
+          // Scratchpad generation (generateScratchpad -> complete()) is a
+          // plain non-streaming completion, distinct from the main
+          // streaming loop below — must not shift the round-numbered
+          // branching, and must get back valid JSON (not an SSE stream) or
+          // it throws and is silently swallowed by run()'s best-effort catch.
+          scratchpadCalls++;
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ choices: [{ message: { content: 'Goal: write the note. Status: in progress.' } }] }));
+          return;
+        }
         requests.push(payload);
         requestCount++;
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -667,7 +679,8 @@ async function main() {
 
     assert.strictEqual(session.status, 'done', `expected status done, got ${session.status}`);
     assert.strictEqual(session.finalReport, 'All done — file written.');
-    assert.strictEqual(requestCount, 3, `expected exactly 3 requests, got ${requestCount}`);
+    assert.strictEqual(requestCount, 3, `expected exactly 3 main-loop requests, got ${requestCount}`);
+    assert(scratchpadCalls > 0, 'expected the scratchpad to actually be generated (regression check for generateScratchpad\'s missing complete() import)');
 
     // Request #3 must have carried the structured packet.
     const req3 = requests[2];

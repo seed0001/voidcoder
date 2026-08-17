@@ -1101,12 +1101,87 @@ function bind() {
 }
 
 // ============================================================ focus panel
+//
+// Two views sharing one container: a flat list of active focus/sub agents,
+// and a per-agent detail view (click a card to drill in, click "back" to
+// return to the list — like a process tree with one level of children).
+// The list-card "N min remaining" used to only update when a narrative log
+// event fired (errors, compaction, questions, finish) — normal tool-call
+// rounds never touched it, so it read as frozen for the whole run. Every
+// tool call and every bit of the model's "thinking" prose is now logged as
+// structured activity (see src/focus.js addLog), AND the remaining-time
+// display ticks locally off a tracked deadline every second regardless of
+// whether any backend event has fired at all.
 
 let focusList = [];
+let openFocusDetailId = null;
+const focusDetailCache = {}; // id -> full detail payload from focus:detail
+const focusDeadlines = new Map(); // id -> deadline (epoch ms), for active sessions only
+
+function formatFocusRemaining(ms) {
+  if (ms <= 0) return 'wrapping up…';
+  const totalSec = Math.ceil(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min}m ${String(sec).padStart(2, '0')}s remaining` : `${sec}s remaining`;
+}
+
+function trackFocusDeadline(s) {
+  if (!s || !s.id) return;
+  if (s.status === 'working' || s.status === 'waiting') {
+    focusDeadlines.set(s.id, Date.now() + (s.remainingMs ?? (s.remainingMin || 0) * 60000));
+  } else {
+    focusDeadlines.delete(s.id);
+  }
+}
+
+function tickFocusCountdowns() {
+  if (!focusDeadlines.size) return;
+  for (const [id, deadline] of focusDeadlines) {
+    const text = formatFocusRemaining(deadline - Date.now());
+    $$(`.fc-countdown[data-id="${id}"]`).forEach((el) => { el.textContent = text; });
+  }
+}
+
+function formatFocusEntry(l) {
+  const time = l.ts ? new Date(l.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
+  if (l.kind === 'tool') {
+    const argsStr = l.args && Object.keys(l.args).length ? JSON.stringify(l.args) : '';
+    return `
+      <div class="fc-entry fc-entry-tool${l.ok === false ? ' fc-entry-fail' : ''}">
+        <div class="fc-entry-head">
+          <span class="fc-entry-time">${time}</span>
+          <span class="fc-kind-badge fc-kind-tool">tool</span>
+          <span class="fc-entry-tool-name">${escapeHtml(l.tool || '?')}</span>
+          ${l.ok === false ? '<span class="fc-entry-badge-fail">failed</span>' : ''}
+        </div>
+        ${argsStr ? `<div class="fc-entry-args">${escapeHtml(argsStr.slice(0, 300))}</div>` : ''}
+        ${l.output ? `<div class="fc-entry-output">${escapeHtml(String(l.output).slice(0, 400))}</div>` : ''}
+      </div>`;
+  }
+  if (l.kind === 'thought') {
+    return `
+      <div class="fc-entry fc-entry-thought">
+        <div class="fc-entry-head"><span class="fc-entry-time">${time}</span><span class="fc-kind-badge fc-kind-thought">thinking</span></div>
+        <div class="fc-entry-text">${escapeHtml(l.text || '')}</div>
+      </div>`;
+  }
+  return `
+    <div class="fc-entry fc-entry-note">
+      <div class="fc-entry-head"><span class="fc-entry-time">${time}</span><span class="fc-kind-badge fc-kind-note">note</span></div>
+      <div class="fc-entry-text">${escapeHtml(l.text || '')}</div>
+    </div>`;
+}
 
 function renderFocusPanel() {
   const container = $('#focus-panel');
   if (!container) return;
+  if (openFocusDetailId) renderFocusDetailView(container);
+  else renderFocusListView(container);
+}
+
+function renderFocusListView(container) {
+  focusList.forEach(trackFocusDeadline);
   if (!focusList.length) {
     container.innerHTML = '<div class="fp-empty">No active focus sessions</div>';
     return;
@@ -1117,11 +1192,11 @@ function renderFocusPanel() {
         <span class="fc-id">${s.id}</span>
         <span class="fc-status ${s.status}">${s.status}</span>
       </div>
-      <div class="fc-desc">${s.description || '(no description)'}</div>
-      <div class="fc-meta">${s.remainingMin}min remaining</div>
-      ${s.log && s.log.length ? `<div class="fc-log">${s.log.map(l => `<div class="fc-log-line">${escapeHtml(l.entry)}</div>`).join('')}</div>` : ''}
-      ${s.question ? `<div class="fc-question">❓ ${s.question}</div>` : ''}
-      ${s.finalReport ? `<div class="fc-report">${s.finalReport}</div>` : ''}
+      <div class="fc-desc">${escapeHtml(s.description || '(no description)')}</div>
+      <div class="fc-meta fc-countdown" data-id="${s.id}">${formatFocusRemaining(s.remainingMs)}</div>
+      ${s.log && s.log.length ? `<div class="fc-log">${s.log.map(l => `<div class="fc-log-line">${escapeHtml(l.text || l.tool || '')}</div>`).join('')}</div>` : ''}
+      ${s.question ? `<div class="fc-question">❓ ${escapeHtml(s.question)}</div>` : ''}
+      ${s.finalReport ? `<div class="fc-report">${escapeHtml(s.finalReport)}</div>` : ''}
       ${s.status === 'waiting' ? `
         <div class="fc-answer-form">
           <input type="text" class="fc-answer-input" placeholder="Your answer…" data-id="${s.id}">
@@ -1129,6 +1204,13 @@ function renderFocusPanel() {
         </div>` : ''}
     </div>
   `).join('');
+
+  $$('.focus-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.fc-answer-form')) return;
+      openFocusDetail(card.dataset.id);
+    });
+  });
 
   $$('.fc-answer-btn').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -1144,6 +1226,88 @@ function renderFocusPanel() {
   });
 }
 
+async function openFocusDetail(id) {
+  openFocusDetailId = id;
+  await refreshFocusDetail(id);
+}
+
+function closeFocusDetail() {
+  openFocusDetailId = null;
+  renderFocusPanel();
+}
+
+async function refreshFocusDetail(id) {
+  try {
+    const detail = await window.vc.getFocusDetail(id);
+    if (detail) { focusDetailCache[id] = detail; trackFocusDeadline(detail); }
+  } catch { /* best-effort */ }
+  if (openFocusDetailId === id) renderFocusPanel();
+}
+
+function renderFocusDetailView(container) {
+  const d = focusDetailCache[openFocusDetailId];
+  if (!d) {
+    container.innerHTML = `
+      <div class="fc-detail">
+        <div class="fc-breadcrumb"><button class="fc-back-btn">← Focus agents</button></div>
+        <div class="fp-empty">Loading…</div>
+      </div>`;
+    $('.fc-back-btn')?.addEventListener('click', closeFocusDetail);
+    return;
+  }
+  const isActive = d.status === 'working' || d.status === 'waiting';
+  container.innerHTML = `
+    <div class="fc-detail">
+      <div class="fc-breadcrumb">
+        <button class="fc-back-btn">← Focus agents</button>
+        <span class="fc-crumb-sep">/</span>
+        <span class="fc-crumb-current">${escapeHtml(d.id)}</span>
+      </div>
+      <div class="fc-detail-header">
+        <span class="fc-status ${d.status}">${d.status}</span>
+        <span class="fc-detail-model">${escapeHtml(d.model || 'inherits main model')}</span>
+        ${d.role ? `<span class="fc-detail-role">${escapeHtml(d.role)}</span>` : ''}
+      </div>
+      <div class="fc-desc">${escapeHtml(d.description || '(no description)')}</div>
+      ${isActive ? `<div class="fc-meta fc-countdown" data-id="${d.id}">${formatFocusRemaining(d.remainingMs)}</div>` : ''}
+      ${d.scratchpad ? `<div class="fc-section-label">Currently thinking</div><div class="fc-scratch">${escapeHtml(d.scratchpad)}</div>` : ''}
+      ${d.question ? `
+        <div class="fc-question">❓ ${escapeHtml(d.question)}</div>
+        <div class="fc-answer-form">
+          <input type="text" class="fc-answer-input" placeholder="Your answer…" data-id="${d.id}">
+          <button class="fc-answer-btn" data-id="${d.id}">Answer</button>
+        </div>` : ''}
+      <div class="fc-section-label">Activity (${d.toolCalls || 0} tool call${d.toolCalls === 1 ? '' : 's'})</div>
+      <div class="fc-timeline" id="fc-timeline">
+        ${d.log && d.log.length ? d.log.map(formatFocusEntry).join('') : '<div class="fp-empty">No activity recorded yet.</div>'}
+      </div>
+      ${d.finalReport ? `<div class="fc-section-label">Final report</div><div class="fc-report">${escapeHtml(d.finalReport)}</div>` : ''}
+      ${isActive ? `<button class="fc-cancel-btn" data-id="${d.id}">Cancel this agent</button>` : ''}
+    </div>
+  `;
+
+  $('.fc-back-btn')?.addEventListener('click', closeFocusDetail);
+  const timeline = $('#fc-timeline');
+  if (timeline) timeline.scrollTop = timeline.scrollHeight;
+
+  $$('.fc-answer-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.id;
+      const input = document.querySelector(`.fc-answer-input[data-id="${id}"]`);
+      const answer = input?.value?.trim();
+      if (!answer) return;
+      input.value = '';
+      await window.vc.focusAnswer(id, answer);
+      await refreshFocusDetail(id);
+    });
+  });
+  $('.fc-cancel-btn')?.addEventListener('click', async (e) => {
+    const id = e.currentTarget.dataset.id;
+    await window.vc.focusCancel(id);
+    await refreshFocusDetail(id);
+  });
+}
+
 function setupFocusEvents() {
   window.vc.onFocusStart?.(async (session) => {
     focusList = (await window.vc.getFocusList()) || [];
@@ -1151,27 +1315,47 @@ function setupFocusEvents() {
   });
   window.vc.onFocusQuestion?.(async ({ session, question }) => {
     focusList = (await window.vc.getFocusList()) || [];
-    renderFocusPanel();
+    if (openFocusDetailId === session?.id) await refreshFocusDetail(session.id);
+    else renderFocusPanel();
     note(`Focus ${session.id} asks: ${question}`);
   });
   window.vc.onFocusResume?.(async (session) => {
     focusList = (await window.vc.getFocusList()) || [];
-    renderFocusPanel();
+    if (openFocusDetailId === session?.id) await refreshFocusDetail(session.id);
+    else renderFocusPanel();
   });
   window.vc.onFocusDone?.(async ({ session, status, report }) => {
     focusList = (await window.vc.getFocusList()) || [];
-    renderFocusPanel();
+    if (openFocusDetailId === session?.id) await refreshFocusDetail(session.id);
+    else renderFocusPanel();
     note(`Focus ${session.id} ${status}: ${report?.slice(0, 200) || '(no report)'}`);
   });
   window.vc.onFocusLog?.(async ({ session, entry }) => {
     focusList = (await window.vc.getFocusList()) || [];
-    const card = document.querySelector(`.focus-card[data-id="${session?.id || ''}"]`);
+    const id = session?.id;
+    if (openFocusDetailId === id) {
+      // Live-append straight into the open timeline — avoids a full
+      // re-fetch/re-render (and losing scroll position) on every tool call
+      // while the agent is actively working.
+      const cached = focusDetailCache[id];
+      const timeline = $('#fc-timeline');
+      if (cached && timeline) {
+        cached.log = [...(cached.log || []), entry].slice(-300);
+        if (entry.kind === 'tool') cached.toolCalls = (cached.toolCalls || 0) + 1;
+        timeline.insertAdjacentHTML('beforeend', formatFocusEntry(entry));
+        timeline.scrollTop = timeline.scrollHeight;
+      } else {
+        renderFocusPanel();
+      }
+      return;
+    }
+    const card = document.querySelector(`.focus-card[data-id="${id || ''}"]`);
     if (card) {
       let log = card.querySelector('.fc-log');
       if (!log) { log = document.createElement('div'); log.className = 'fc-log'; card.appendChild(log); }
       const line = document.createElement('div');
       line.className = 'fc-log-line';
-      line.textContent = entry;
+      line.textContent = entry.text || entry.tool || '';
       log.appendChild(line);
       while (log.children.length > 14) log.removeChild(log.firstChild);
     } else {
@@ -1278,6 +1462,134 @@ function setupModelSelector() {
   });
 }
 
+// ============================================================ corner media player
+// A bottom-right media player that imports a local music folder, plays a
+// shuffled playlist, and drives a frequency-reactive ambient visualizer from
+// the live audio spectrum. Media logic lives in mediaPlayer.js + visualizer.js.
+let mp = null;            // MediaPlayer instance
+let mpViz = null;         // visualizer instance
+let mpCollapsed = false;
+let mpEl, mpTitleEl, mpFolderEl, mpMetaEl, mpFillEl;
+let mpDrag = false;
+
+function fmtTime(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  const m = Math.floor(s / 60), sec = s % 60;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function baseName(p) {
+  if (!p) return '';
+  const parts = String(p).split(/[\\/]/);
+  return parts[parts.length - 1];
+}
+
+function renderMp(state) {
+  if (!mpTitleEl) return;
+  const cur = state.current;
+  mpTitleEl.textContent = cur ? baseName(cur) : '—';
+  mpFolderEl.textContent = state.name ? (state.folder || state.name) : 'No music folder';
+  const meta = [];
+  if (state.total) meta.push(`${state.index + 1}/${state.total}`);
+  if (state.playing) meta.push('●');
+  else if (cur) meta.push('Ⅱ');
+  mpMetaEl.textContent = meta.join('  ');
+  // progress bar
+  if (state.duration > 0) {
+    const pct = Math.min(100, (state.position / state.duration) * 100);
+    mpFillEl.style.width = pct + '%';
+  } else {
+    mpFillEl.style.width = '0%';
+  }
+  $('#mp-shuffle').classList.toggle('on', state.shuffle);
+  $('#mp-repeat').classList.toggle('on', state.repeat);
+  // play/pause icon
+  const ic = $('#mp-toggle svg');
+  if (ic) ic.innerHTML = state.playing ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
+}
+
+async function importMediaFolder() {
+  const res = await window.vc.chooseMediaFolder();
+  if (!res) return;
+  const { folder, files } = res;
+  if (!files || !files.length) {
+    mpTitleEl.textContent = 'No audio found';
+    mpFolderEl.textContent = folder;
+    return;
+  }
+  const name = (String(folder).split(/[\\/]/).pop()) || folder;
+  mp.setFolder(name, files);
+  renderMp(mp.getState());
+  mpTitleEl.textContent = baseName(files[0]) || 'Ready';
+}
+
+function setupMediaPlayer() {
+  const panel = $('#media-player');
+  if (!panel) return;
+  mpEl = panel;
+  mpTitleEl = $('#mp-title');
+  mpFolderEl = $('#mp-folder');
+  mpMetaEl = $('#mp-meta');
+  mpFillEl = $('#mp-fill');
+  const vizu = $('#vizu');
+
+  // create player + visualizer
+  mp = window.MediaPlayer.createMediaPlayer({
+    onState: (s) => renderMp(s),
+    onTrack: () => {},
+  });
+  mpViz = window.createVisualizer(vizu, () => mp.getFrequencyData());
+  mpViz.start();
+
+  // controls
+  $('#mp-open').addEventListener('click', importMediaFolder);
+  $('#mp-toggle').addEventListener('click', () => mp.toggle());
+  $('#mp-next').addEventListener('click', () => mp.next());
+  $('#mp-prev').addEventListener('click', () => mp.prev());
+  $('#mp-shuffle').addEventListener('click', () => { mp.setShuffle(!mp.getState().shuffle); renderMp(mp.getState()); });
+  $('#mp-repeat').addEventListener('click', () => { mp.setRepeat(!mp.getState().repeat); renderMp(mp.getState()); });
+  $('#mp-volume').addEventListener('input', (e) => { mp.setVolume(parseFloat(e.target.value)); });
+  $('#mp-collapse').addEventListener('click', () => {
+    mpCollapsed = !mpCollapsed;
+    panel.classList.toggle('collapsed', mpCollapsed);
+    setTimeout(() => mpViz && mpViz.resize(), 30);
+  });
+
+  // progress bar scrubbing
+  const mkBar = (e) => {
+    const r = panel.querySelector('.mp-bar').getBoundingClientRect();
+    const pct = (e.clientX - r.left) / r.width;
+    const d = mp.getState().duration;
+    if (d > 0) mp.seek(pct * d);
+  };
+  let scrubbing = false;
+  panel.querySelector('.mp-bar').addEventListener('pointerdown', (e) => { scrubbing = true; mkBar(e); });
+  window.addEventListener('pointermove', (e) => { if (scrubbing) mkBar(e); });
+  window.addEventListener('pointerup', () => { scrubbing = false; });
+
+  // drag to move the panel
+  const handle = panel;
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('canvas') || e.target.closest('.mp-bar')) return;
+    mpDrag = true;
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!mpDrag) return;
+    const rect = panel.getBoundingClientRect();
+    const c = document.querySelector('.mp-collapse');
+    const cRect = c.getBoundingClientRect();
+    let x = e.clientX - rect.width / 2;
+    let y = e.clientY - cRect.height / 2;
+    x = Math.max(10, Math.min(window.innerWidth - rect.width - 10, x));
+    y = Math.max(10, Math.min(window.innerHeight - rect.height - 10, y));
+    panel.style.left = x + 'px';
+    panel.style.top = y + 'px';
+  });
+  window.addEventListener('pointerup', () => { mpDrag = false; });
+
+  window.addEventListener('resize', () => { if (mpViz) mpViz.resize(); });
+}
+
 async function boot() {
   snap = await window.vc.init();
   showView('desktop');
@@ -1286,7 +1598,9 @@ async function boot() {
   setupModelSelector();
   focusList = (await window.vc.getFocusList()) || [];
   renderFocusPanel();
+  setInterval(tickFocusCountdowns, 1000);
   await loadModels();
+  setupMediaPlayer();
   // Set initial model name
   if (snap?.provider) {
     $('#model-name').textContent = `${snap.provider.name}/${snap.provider.model}`;

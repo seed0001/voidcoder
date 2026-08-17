@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('vc', {
   moveProject: (id, x, y) => ipcRenderer.invoke('project:move', { id, x, y }),
   openProject: (id) => ipcRenderer.invoke('project:open', id),
 
+  chooseMediaFolder: () => ipcRenderer.invoke('media:chooseFolder'),
+
   send: (payload) => ipcRenderer.invoke('chat:send', payload),
   stop: () => ipcRenderer.invoke('chat:stop'),
   compact: () => ipcRenderer.invoke('chat:compact'),
@@ -45,6 +47,7 @@ contextBridge.exposeInMainWorld('vc', {
   rebuildCost: () => ipcRenderer.invoke('cost:rebuild'),
 
   getFocusList: () => ipcRenderer.invoke('focus:list'),
+  getFocusDetail: (id) => ipcRenderer.invoke('focus:detail', { id }),
   focusAnswer: (id, answer) => ipcRenderer.invoke('focus:answer', { id, answer }),
   focusCancel: (id) => ipcRenderer.invoke('focus:cancel', { id }),
 

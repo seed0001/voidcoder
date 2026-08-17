@@ -6,12 +6,12 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
-const { streamChat } = require('./providers');
+const { streamChat, complete } = require('./providers');
 const { buildSystemPrompt } = require('./prompt');
 const { Permissions } = require('./permissions');
 const { projectDir } = require('./sessions');
 const guardrails = require('./guardrails');
-const { buildContinuationPacket } = require('./continuationPacket');
+const { buildContinuationPacket, clip } = require('./continuationPacket');
 
 const BOARD_DIR = path.join(os.homedir(), '.voidcode', 'focus');
 const BOARD_FILE = path.join(BOARD_DIR, 'board.json');
@@ -100,10 +100,22 @@ class FocusSession {
     this._emptyRounds = 0;
   }
 
-  addLog(entry) {
-    this.log.push({ ts: Date.now(), entry });
-    if (this.log.length > 50) this.log.shift();
-    try { this.manager.emit('log', this, entry); } catch {}
+  // Accepts a plain string (legacy narrative note — "compacting context…",
+  // "asked: ...") or a structured record ({ kind: 'tool'|'thought'|'note',
+  // ... }). Every stored record carries `kind` and a renderable summary so
+  // the desktop UI can show a real activity timeline (tool calls, model
+  // "thinking" prose, and milestone notes) when a user drills into a
+  // session — not just the sparse error/milestone narration this used to be
+  // limited to.
+  addLog(entryOrRecord) {
+    const record = typeof entryOrRecord === 'string'
+      ? { kind: 'note', text: entryOrRecord }
+      : { kind: 'note', ...entryOrRecord };
+    const full = { ts: Date.now(), ...record };
+    this.log.push(full);
+    if (this.log.length > 300) this.log.shift();
+    try { this.manager.emit('log', this, full); } catch {}
+    return full;
   }
 
   async generateScratchpad(turnProvider) {
@@ -492,6 +504,7 @@ class FocusSession {
         }
         if (content.trim()) {
           this.messages.push({ role: 'assistant', content });
+          this.addLog({ kind: 'thought', text: clip(content, 500) });
           // Real prose this round (just no tool call / focus_complete yet) —
           // a legitimate, if incomplete, turn. Only genuinely BLANK
           // completions (no text AND no tool call) count toward the
@@ -532,6 +545,9 @@ class FocusSession {
         continue;
       }
 
+      if (result.content && result.content.trim()) {
+        this.addLog({ kind: 'thought', text: clip(result.content, 500) });
+      }
       this.messages.push({ role: 'assistant', content: result.content || null, tool_calls: result.toolCalls });
       this._emptyRounds = 0;
 
@@ -577,6 +593,7 @@ class FocusSession {
           }
         }
         this.messages.push({ role: 'tool', tool_call_id: call.id, content: String(output) });
+        this.addLog({ kind: 'tool', tool: name, args, ok, output: clip(String(output), 400) });
       }
 
       if (completedReport !== null) {
@@ -618,6 +635,29 @@ class FocusSession {
       role: this.role,
       log: this.log.slice(-5),
       finalReport: this.finalReport?.slice(0, 500)
+    };
+  }
+
+  // Fuller payload for the drill-down detail view: the whole recent activity
+  // timeline (tool calls, thinking, notes) and the untruncated report,
+  // instead of the last-5-lines preview getStatus() uses for the list.
+  getDetail() {
+    return {
+      id: this.id,
+      description: this.description,
+      prompt: this.prompt,
+      status: this.status,
+      question: this.question,
+      remainingMs: this.remainingMs,
+      remainingMin: this.remainingMin,
+      createdAt: this.createdAt,
+      model: this.modelOverride || null,
+      role: this.role,
+      mode: this.mode,
+      scratchpad: this.scratchpad || '',
+      toolCalls: this._toolCalls,
+      log: this.log.slice(-300),
+      finalReport: this.finalReport || '',
     };
   }
 }
@@ -680,6 +720,11 @@ class FocusManager {
 
   list() {
     return Array.from(this.sessions.values()).map(s => s.getStatus());
+  }
+
+  getDetail(id) {
+    const s = this.sessions.get(id);
+    return s ? s.getDetail() : null;
   }
 
   answer(id, answer) {
