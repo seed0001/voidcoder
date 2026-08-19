@@ -1,8 +1,17 @@
 // Streaming OpenAI-compatible chat client with tool-call accumulation.
 // Works against OpenRouter, OpenAI, Ollama (/v1), llama.cpp server, and any
-// other OpenAI-compatible endpoint.
+// other OpenAI-compatible endpoint. provider.type === 'cli' (the Claude Code
+// CLI, subscription-authenticated) is dispatched to a subprocess bridge
+// instead — see claudeCli.js.
 
-async function streamChat(provider, messages, tools, { onDelta, onReasoningDelta, signal, idleTimeoutMs = 90000 } = {}) {
+const { streamChatClaudeCli } = require('./claudeCli');
+
+async function streamChat(provider, messages, tools, opts = {}) {
+  if (provider.type === 'cli') return streamChatClaudeCli(provider, messages, tools, opts);
+  return streamChatHttp(provider, messages, tools, opts);
+}
+
+async function streamChatHttp(provider, messages, tools, { onDelta, onReasoningDelta, signal, idleTimeoutMs = 90000 } = {}) {
   const url = provider.baseUrl.replace(/\/+$/, '') + '/chat/completions';
   const headers = { 'Content-Type': 'application/json' };
   if (provider.apiKey) headers['Authorization'] = `Bearer ${provider.apiKey}`;
@@ -310,6 +319,65 @@ function extractToolCallsFromText(text, availableTools) {
   return calls;
 }
 
+// Strip literal tool-call-shaped JSON (fenced ```json blocks or raw balanced-
+// brace objects carrying a name/tool/action key) out of assistant text before
+// it is stored/displayed. Small/local models that can't do native tool
+// calling write this JSON as their only way to "call" a tool (see
+// extractToolCallsFromText above) — it's a wire-protocol artifact, never
+// something the user should see in the chat, whether the call was recognized
+// and routed to the worker or was a fully hallucinated tool name that just
+// silently failed to match. Leaves surrounding prose untouched.
+function stripToolCallText(text) {
+  const s = String(text || '');
+
+  const tryParseJson = (str) => {
+    try { return JSON.parse(str); }
+    catch {
+      try { return JSON.parse(repairTruncatedJson(str)); }
+      catch {
+        const cleaned = str.trim().replace(/,\s*([}\]])/g, '$1').replace(/'/g, '"');
+        try { return JSON.parse(cleaned); }
+        catch {
+          try { return JSON.parse(repairTruncatedJson(cleaned)); }
+          catch { return null; }
+        }
+      }
+    }
+  };
+  const looksLikeCall = (obj) => !!obj && typeof obj === 'object' &&
+    typeof (obj.name || obj.tool || obj.action) === 'string';
+
+  let out = s.replace(/```json\s*([\s\S]*?)\s*```/g, (whole, inner) => (
+    looksLikeCall(tryParseJson(inner.trim())) ? '' : whole
+  ));
+
+  // Raw balanced-brace objects (no fence) — same brace-matching scan as
+  // extractToolCallsFromText above, but removing matches instead of
+  // collecting them.
+  let result = '';
+  for (let i = 0; i < out.length;) {
+    if (out[i] === '{') {
+      let braceCount = 0;
+      let j = i;
+      for (; j < out.length; j++) {
+        if (out[j] === '{') braceCount++;
+        else if (out[j] === '}') {
+          braceCount--;
+          if (braceCount === 0) { j++; break; }
+        }
+      }
+      if (braceCount === 0 && looksLikeCall(tryParseJson(out.slice(i, j)))) {
+        i = j;
+        continue;
+      }
+    }
+    result += out[i];
+    i++;
+  }
+
+  return result.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 // Non-streaming single completion (titles, compaction summaries).
 async function complete(provider, messages, { maxTokens } = {}) {
   const url = provider.baseUrl.replace(/\/+$/, '') + '/chat/completions';
@@ -327,4 +395,4 @@ async function complete(provider, messages, { maxTokens } = {}) {
   return json.choices?.[0]?.message?.content || '';
 }
 
-module.exports = { streamChat, complete, extractToolCallsFromText };
+module.exports = { streamChat, complete, extractToolCallsFromText, stripToolCallText };

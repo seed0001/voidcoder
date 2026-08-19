@@ -82,7 +82,7 @@ class Session {
   static list(cwd) {
     const dir = projectDir(cwd);
     return fs.readdirSync(dir)
-      .filter((f) => f.endsWith('.json'))
+      .filter((f) => f.endsWith('.json') && f !== 'cost.json')
       .map((f) => {
         try {
           const data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));

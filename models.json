@@ -56,6 +56,30 @@
       "baseUrl": "https://openrouter.ai/api/v1",
       "costCategory": "paid",
       "capabilities": ["coding", "reasoning", "planning", "architecture"]
+    },
+    {
+      "id": "claude-sonnet",
+      "provider": "claude",
+      "modelName": "sonnet",
+      "costCategory": "subscription",
+      "costTier": "average",
+      "capabilities": ["coding", "reasoning", "planning", "architecture", "agentic"]
+    },
+    {
+      "id": "claude-opus",
+      "provider": "claude",
+      "modelName": "opus",
+      "costCategory": "subscription",
+      "costTier": "premium",
+      "capabilities": ["coding", "reasoning", "planning", "architecture", "agentic"]
+    },
+    {
+      "id": "claude-haiku",
+      "provider": "claude",
+      "modelName": "haiku",
+      "costCategory": "subscription",
+      "costTier": "economy",
+      "capabilities": ["coding", "simple-tasks", "agentic"]
     }
   ]
 }

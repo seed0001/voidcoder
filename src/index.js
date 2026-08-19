@@ -27,6 +27,7 @@ ${c.bold('Slash commands')}
   /model [id]           show or set model (e.g. /model openrouter/anthropic/claude-sonnet-4.5)
   /models [query]       list models from the live catalog (filter optional)
   /models set <id>      switch to a model from the catalog
+  /claude-account [name]  list/switch Claude subscription accounts (add: /claude-account add <name> <dir>)
   /compact              summarize old context to free the window
   /undo                 revert the most recent file change
   /diff                 show files changed this session
@@ -487,6 +488,40 @@ async function main() {
           cfg = config.load(cwd);
           console.log(c.muted(`model → ${provider.name}/${provider.model} (saved)`));
         } catch (err) { console.log(c.err(err.message)); }
+        break;
+      }
+      case 'claude-account': {
+        const cp = cfg.providers.claude || {};
+        const accounts = Object.keys(cp.accounts || {});
+        if (!arg) {
+          if (!accounts.length) { console.log(c.muted('no claude accounts configured')); break; }
+          for (const name of accounts) {
+            const mark = name === (cp.activeAccount || 'default') ? c.ok('●') : ' ';
+            const dir = cp.accounts[name].configDir || '(default ~/.claude)';
+            console.log(`${mark} ${name}  ${c.muted(dir)}`);
+          }
+          console.log(c.muted('usage: /claude-account <name>  ·  /claude-account add <name> <configDir>'));
+          break;
+        }
+        const [sub, ...subRest] = arg.split(/\s+/);
+        if (sub === 'add') {
+          const [name, dir] = subRest;
+          if (!name || !dir) { console.log(c.err('usage: /claude-account add <name> <configDir>')); break; }
+          config.saveGlobal({ providers: { claude: { accounts: { [name]: { configDir: dir } } } } });
+          cfg = config.load(cwd);
+          console.log(c.ok(`account "${name}" added — log into it once with:`));
+          console.log(c.muted(`  $env:CLAUDE_CONFIG_DIR="${dir}"; claude auth login`));
+          break;
+        }
+        if (!accounts.includes(sub)) { console.log(c.err(`unknown account "${sub}" — configured: ${accounts.join(', ') || '(none)'}`)); break; }
+        config.saveGlobal({ providers: { claude: { activeAccount: sub } } });
+        cfg = config.load(cwd);
+        if (provider.name === 'claude') {
+          provider = config.resolveProvider(cfg, `claude/${provider.model}`);
+          agent.provider = provider;
+          agent.refreshProviders();
+        }
+        console.log(c.muted(`claude account → ${sub} (saved)`));
         break;
       }
       case 'delete': {

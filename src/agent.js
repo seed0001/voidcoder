@@ -1,7 +1,7 @@
 // The agent loop: streaming, tool execution with permission gates, context
 // compaction, subagents, usage tracking.
 
-const { streamChat, complete, extractToolCallsFromText } = require('./providers');
+const { streamChat, complete, extractToolCallsFromText, stripToolCallText } = require('./providers');
 const { buildSystemPrompt } = require('./prompt');
 const { resolveProvider } = require('./config');
 const toolRegistry = require('./tools');
@@ -801,7 +801,15 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
           const knownTools = [...toolRegistry.allToolNames(), 'work'];
           const workCalls = extractToolCallsFromText(result.content, knownTools);
           if (workCalls.length) {
-            messages.push({ role: 'assistant', content: result.content });
+            // The model wrote its tool call as literal JSON text (no native
+            // tool-calling support). That JSON was just parsed into workCalls
+            // above — it must never also appear verbatim in the visible/
+            // persisted chat, whether every call in it resolved (like a
+            // recognized `current_model`) or it also contained a fully
+            // hallucinated tool name that silently found no match. Keep any
+            // real surrounding prose; drop only the call syntax itself.
+            const visibleContent = stripToolCallText(result.content);
+            messages.push({ role: 'assistant', content: visibleContent || null });
             finalText = '';
             const work = workCalls.find((c) => c.function.name === 'work');
             if (work) {

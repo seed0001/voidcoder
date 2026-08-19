@@ -28,6 +28,25 @@ const DEFAULTS = {
     llamacpp: { baseUrl: 'http://localhost:8080/v1', apiKey: '', apiKeyEnv: '', contextTokens: 16384 },
     openai: { baseUrl: 'https://api.openai.com/v1', apiKey: '', apiKeyEnv: 'OPENAI_API_KEY' },
     fairrouter: { baseUrl: 'https://fairrouter.ai/v1', apiKey: '', apiKeyEnv: 'FAIRROUTER_API_KEY' },
+    // No baseUrl/apiKey — routed through the Claude Code CLI as a subprocess
+    // (see claudeCli.js), authenticated with a claude.ai subscription login
+    // rather than an API key. Personal-use only: Anthropic's subscription
+    // OAuth terms cover individual use of Claude Code, not third parties
+    // authenticating through an app built on top of it.
+    claude: {
+      type: 'cli',
+      binPath: 'claude',
+      model: 'sonnet', // sonnet | opus | haiku | fable
+      permissionMode: 'acceptEdits', // acceptEdits | auto | bypassPermissions | manual | dontAsk | plan
+      activeAccount: 'default',
+      // Each account is a separate claude.ai login, isolated by its own
+      // CLAUDE_CONFIG_DIR. '' means "whatever's logged into the normal
+      // ~/.claude". Add another with /claude-account add <name> <dir>, then
+      // log into it once: $env:CLAUDE_CONFIG_DIR="<dir>"; claude auth login
+      accounts: {
+        default: { configDir: '' },
+      },
+    },
   },
   integrations: {
     githubToken: '',
