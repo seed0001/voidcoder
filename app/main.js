@@ -552,16 +552,29 @@ function getContainerRepository(container) {
   return repo;
 }
 
+// Dependency/build-output directories that are near-never useful as
+// cross-referenceable project content and can each hold thousands of files —
+// dragging a whole project (e.g. one with node_modules, or a .NET project
+// with obj/bin) onto a container would otherwise flood it with generated
+// noise instead of the actual source the agent should index.
+const CONTAINER_REF_SKIP_DIRS = new Set([
+  'node_modules', '.git', '.svn', '.hg', 'dist', 'build', 'out', 'target',
+  'obj', 'bin', '.next', '.nuxt', '__pycache__', '.venv', 'venv', '.tox',
+  'vendor', '.cache', 'coverage', '.idea', '.vscode',
+]);
+
 // Recursively collects individual FILE paths under a directory (folders
 // themselves never become refs — this keeps hashing/status file-granular
 // even when the user only picked a folder). Skips symlinks (same guard the
-// corner media player's own folder scan uses) and is bounded so a huge
-// folder can't hang the picker.
+// corner media player's own folder scan uses), skips dependency/build-output
+// directories (see CONTAINER_REF_SKIP_DIRS), and is bounded so a huge folder
+// can't hang the picker.
 function collectFilesUnder(dir, out = [], limit = 5000) {
   let entries;
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
   for (const ent of entries) {
     if (out.length >= limit) return out;
+    if (ent.isDirectory() && CONTAINER_REF_SKIP_DIRS.has(ent.name)) continue;
     const full = path.join(dir, ent.name);
     try { if (fs.lstatSync(full).isSymbolicLink()) continue; } catch { continue; }
     if (ent.isDirectory()) collectFilesUnder(full, out, limit);
@@ -592,15 +605,14 @@ ipcMain.handle('container:create', async (e, { name }) => {
   return snapshot();
 });
 
-ipcMain.handle('container:addRefs', async (e, { id }) => {
-  const container = findContainer(id);
-  if (!container) return null;
-  const res = await dialog.showOpenDialog(win, { properties: ['openFile', 'openDirectory', 'multiSelections'] });
-  if (res.canceled || !res.filePaths.length) return { addedCount: 0 };
-
+// Shared by the file-picker flow and the desktop drag-a-project-onto-a-
+// container flow: resolves each path (file or folder, folders recursed) into
+// individual file refs, adds them, and kicks off incremental indexing for
+// just what's new.
+async function addPathsToContainer(container, paths) {
   const repo = getContainerRepository(container);
   const addedRefIds = [];
-  for (const p of res.filePaths) {
+  for (const p of paths) {
     let isDir = false;
     try { isDir = fs.statSync(p).isDirectory(); } catch { continue; }
     const files = isDir ? collectFilesUnder(p) : [p];
@@ -609,7 +621,6 @@ ipcMain.handle('container:addRefs', async (e, { id }) => {
       addedRefIds.push(ref.ref_id);
     }
   }
-
   // Auto-index just the newly added refs — everything else in the container
   // is already indexed and unchanged, so there's no reason to re-scan it.
   if (addedRefIds.length && agent) {
@@ -620,6 +631,23 @@ ipcMain.handle('container:addRefs', async (e, { id }) => {
     });
   }
   return { addedCount: addedRefIds.length };
+}
+
+ipcMain.handle('container:addRefs', async (e, { id }) => {
+  const container = findContainer(id);
+  if (!container) return null;
+  const res = await dialog.showOpenDialog(win, { properties: ['openFile', 'openDirectory', 'multiSelections'] });
+  if (res.canceled || !res.filePaths.length) return { addedCount: 0 };
+  return addPathsToContainer(container, res.filePaths);
+});
+
+// Desktop drag-and-drop: drop a project icon onto a container icon to add
+// that whole project folder as references — no dialog, the paths are
+// already known (the project's own folder).
+ipcMain.handle('container:addRefPaths', async (e, { id, paths }) => {
+  const container = findContainer(id);
+  if (!container || !Array.isArray(paths) || !paths.length) return { addedCount: 0 };
+  return addPathsToContainer(container, paths);
 });
 
 ipcMain.handle('container:removeRef', async (e, { id, refId }) => {
@@ -969,6 +997,10 @@ ipcMain.handle('bugreport:openUrl', (e, url) => {
   if (typeof url !== 'string' || !url.startsWith(`https://github.com/${REPO_OWNER}/${REPO_NAME}/issues`)) return;
   shell.openExternal(url);
 });
+
+// ---------------------------------------------------------------- activity widget IPC
+
+ipcMain.handle('activity:summary', () => require('../src/activityTracker').summary({ weeks: 20 }));
 
 ipcMain.handle('cost:summary', () => costTracker.load(cwd));
 

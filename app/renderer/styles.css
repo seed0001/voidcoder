@@ -116,6 +116,11 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
   overflow-wrap: break-word; word-break: break-word;
 }
 .desktop-icon-container svg { stroke: #a078ff; }
+.desktop-icon-container.drop-target {
+  background: rgba(160, 120, 255, 0.18);
+  border-color: #a078ff;
+  box-shadow: 0 0 0 2px #a078ff;
+}
 .dicon-caption { font-size: 10px !important; color: var(--faint); }
 .desktop-ctx-menu {
   position: fixed;
@@ -909,7 +914,7 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 #media-player .mp-collapse {
   position: absolute;
   top: 6px;
-  right: 8px;
+  right: 30px;
   z-index: 4;
   background: none;
   border: none;
@@ -1007,4 +1012,101 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
   width: 0%;
   background: linear-gradient(90deg, var(--accent), var(--border));
 }
+
+/* ---------------- dockable widgets: minimize to the widget bar ---------------- */
+.widget-dock-btn {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  z-index: 4;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: none;
+  border: 1px solid var(--border, rgba(120, 200, 255, 0.18));
+  color: var(--dim, #9fb2bd);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0;
+}
+.widget-dock-btn:hover { color: var(--text); border-color: var(--accent); }
+#media-player.docked, #activity-widget.docked { display: none !important; }
+
+#widget-bar {
+  position: fixed;
+  top: 66px;
+  right: 18px;
+  z-index: 130;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wb-icon {
+  width: 40px; height: 40px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px;
+  background: rgba(12, 12, 16, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border, rgba(120, 200, 255, 0.18));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.wb-icon:hover { border-color: var(--accent); transform: scale(1.08); }
+
+/* ---------------- activity widget: GitHub-style contribution graph ---------------- */
+#activity-widget {
+  position: fixed;
+  right: 296px;
+  bottom: 18px;
+  z-index: 120;
+  width: 260px;
+  border-radius: 14px;
+  background: rgba(12, 12, 16, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border, rgba(120, 200, 255, 0.18));
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.55);
+  font-size: 12px;
+  color: var(--text, #e8f1f5);
+  user-select: none;
+}
+.aw-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 34px 10px 14px;
+  cursor: pointer;
+}
+.aw-streak { font-weight: 600; }
+.aw-week { color: var(--dim); flex: 1; }
+.aw-caret { color: var(--dim); transition: transform 0.15s; }
+#activity-widget:not(.collapsed) .aw-caret { transform: rotate(180deg); }
+#activity-widget.collapsed .aw-body { display: none; }
+.aw-body { padding: 0 12px 12px; }
+.aw-months {
+  display: flex; gap: 2px; font-size: 9px; color: var(--faint);
+  margin-bottom: 3px; height: 11px; overflow: hidden;
+}
+.aw-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-template-rows: repeat(7, 1fr);
+  gap: 2px;
+  overflow-x: auto;
+}
+.aw-cell {
+  width: 10px; height: 10px;
+  border-radius: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.aw-cell[data-level="1"] { background: color-mix(in srgb, var(--green) 25%, var(--bg2)); border-color: transparent; }
+.aw-cell[data-level="2"] { background: color-mix(in srgb, var(--green) 50%, var(--bg2)); border-color: transparent; }
+.aw-cell[data-level="3"] { background: color-mix(in srgb, var(--green) 75%, var(--bg2)); border-color: transparent; }
+.aw-cell[data-level="4"] { background: var(--green); border-color: transparent; }
+.aw-legend {
+  display: flex; align-items: center; gap: 3px;
+  margin-top: 6px; font-size: 10px; color: var(--faint);
+}
+.aw-legend .aw-cell { width: 9px; height: 9px; }
 

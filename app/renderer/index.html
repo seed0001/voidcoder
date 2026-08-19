@@ -184,6 +184,38 @@
       <div class="mp-bar"><div class="mp-fill" id="mp-fill"></div></div>
     </div>
     <button class="mp-collapse" id="mp-collapse" title="Collapse / expand">«</button>
+    <button class="widget-dock-btn" id="mp-dock" title="Minimize to widget bar">–</button>
+  </div>
+
+  <!-- activity widget: a GitHub-style contribution graph of agent turns per
+       day, aggregated across every project. -->
+  <div id="activity-widget" class="collapsed" title="Activity">
+    <button class="widget-dock-btn" id="aw-dock" title="Minimize to widget bar">–</button>
+    <div class="aw-summary" id="aw-summary-btn">
+      <span class="aw-streak" id="aw-streak">—</span>
+      <span class="aw-week" id="aw-week"></span>
+      <span class="aw-caret">▾</span>
+    </div>
+    <div class="aw-body">
+      <div class="aw-months" id="aw-months"></div>
+      <div class="aw-grid" id="aw-grid"></div>
+      <div class="aw-legend">
+        <span>Less</span>
+        <span class="aw-cell" data-level="0"></span>
+        <span class="aw-cell" data-level="1"></span>
+        <span class="aw-cell" data-level="2"></span>
+        <span class="aw-cell" data-level="3"></span>
+        <span class="aw-cell" data-level="4"></span>
+        <span>More</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- widget bar: minimized widgets (media player, activity) dock here as
+       small circular icons, out of the way, until clicked to restore. -->
+  <div id="widget-bar" class="hidden">
+    <button class="wb-icon hidden" id="wb-media" title="Media player" data-widget="media-player">🎵</button>
+    <button class="wb-icon hidden" id="wb-activity" title="Activity" data-widget="activity-widget">🔥</button>
   </div>
 </div>
 </div>

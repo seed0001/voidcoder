@@ -254,6 +254,7 @@ window.vc.onTurnEnd(() => {
   if (!voice.speaking) setOrb(voice.handsFree ? 'listening' : 'idle');
   setPacer(false);
   flushSendQueue();
+  refreshActivityWidget();
 });
 
 window.vc.onReasoningDelta((t) => {
@@ -1038,6 +1039,19 @@ function bindDesktopIcon(el, item, kind = 'project') {
     origTop = el.offsetTop;
     el.setPointerCapture(e.pointerId);
   });
+  // Find the container icon (if any) under the pointer, ignoring this icon
+  // itself — used both for the live hover highlight while dragging and to
+  // decide the drop outcome on release. Only a project can be dropped onto a
+  // container (a container can't contain another container).
+  const containerUnderPointer = (e) => {
+    if (kind !== 'project') return null;
+    const prevPointerEvents = el.style.pointerEvents;
+    el.style.pointerEvents = 'none';
+    const hit = document.elementFromPoint(e.clientX, e.clientY)?.closest('.desktop-icon-container');
+    el.style.pointerEvents = prevPointerEvents;
+    return hit || null;
+  };
+
   el.addEventListener('pointermove', (e) => {
     if (!dragging) return;
     const dx = e.clientX - startX;
@@ -1050,6 +1064,8 @@ function bindDesktopIcon(el, item, kind = 'project') {
       const top = Math.max(0, Math.min(host.clientHeight - el.offsetHeight, origTop + dy));
       el.style.left = left + 'px';
       el.style.top = top + 'px';
+      $$('.desktop-icon-container.drop-target').forEach((n) => n.classList.remove('drop-target'));
+      containerUnderPointer(e)?.classList.add('drop-target');
     }
   });
   el.addEventListener('pointerup', async (e) => {
@@ -1057,7 +1073,22 @@ function bindDesktopIcon(el, item, kind = 'project') {
     dragging = false;
     el.classList.remove('dragging');
     el.releasePointerCapture(e.pointerId);
+    $$('.desktop-icon-container.drop-target').forEach((n) => n.classList.remove('drop-target'));
     if (moved) {
+      const dropTarget = containerUnderPointer(e);
+      if (dropTarget) {
+        // Dropped onto a container: add the whole project folder as
+        // references rather than moving the icon there — the project icon
+        // snaps back to where it started.
+        el.style.left = origLeft + 'px';
+        el.style.top = origTop + 'px';
+        const containerId = dropTarget.dataset.id;
+        try {
+          const res = await window.vc.addContainerRefPaths(containerId, [item.path]);
+          if (res?.addedCount) loadContainerCaption(containerId);
+        } catch { /* best-effort */ }
+        return;
+      }
       const snapped = snapToGrid(el.offsetLeft, el.offsetTop);
       el.style.left = snapped.x + 'px';
       el.style.top = snapped.y + 'px';
@@ -1845,6 +1876,92 @@ async function importMediaFolder() {
   mpTitleEl.textContent = baseName(files[0]) || 'Ready';
 }
 
+// ============================================================ widget bar (dock/undock)
+
+function dockWidget(panelId, iconBtnId) {
+  $('#' + panelId)?.classList.add('docked');
+  const icon = $('#' + iconBtnId);
+  icon?.classList.remove('hidden');
+  $('#widget-bar')?.classList.remove('hidden');
+}
+
+function undockWidget(panelId, iconBtnId) {
+  $('#' + panelId)?.classList.remove('docked');
+  $('#' + iconBtnId)?.classList.add('hidden');
+  if (!$$('.wb-icon:not(.hidden)').length) $('#widget-bar')?.classList.add('hidden');
+}
+
+function setupWidgetBar() {
+  $$('.wb-icon').forEach((btn) => {
+    btn.addEventListener('click', () => undockWidget(btn.dataset.widget, btn.id));
+  });
+}
+
+// ============================================================ activity widget
+
+const AW_MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function awLevel(turns, maxTurns) {
+  if (!turns) return 0;
+  if (maxTurns <= 1) return turns > 0 ? 3 : 0;
+  const frac = turns / maxTurns;
+  if (frac > 0.75) return 4;
+  if (frac > 0.5) return 3;
+  if (frac > 0.25) return 2;
+  return 1;
+}
+
+function renderActivityWidget(summary) {
+  if (!summary) return;
+  const streakEl = $('#aw-streak');
+  const weekEl = $('#aw-week');
+  if (streakEl) streakEl.textContent = summary.streak > 0 ? `🔥 ${summary.streak} day${summary.streak === 1 ? '' : 's'}` : 'No streak yet';
+  if (weekEl) weekEl.textContent = `${summary.activeThisWeek}/7 this week`;
+
+  const grid = $('#aw-grid');
+  const months = $('#aw-months');
+  if (!grid || !months) return;
+  grid.innerHTML = '';
+  months.innerHTML = '';
+  const cols = Math.ceil(summary.cells.length / 7);
+  grid.style.gridTemplateColumns = `repeat(${cols}, 10px)`;
+  let lastMonth = -1;
+  for (let col = 0; col < cols; col++) {
+    const weekCells = summary.cells.slice(col * 7, col * 7 + 7);
+    const firstOfMonth = weekCells.find((c) => Number(c.date.slice(8, 10)) <= 7);
+    const label = document.createElement('span');
+    label.style.width = '10px';
+    if (firstOfMonth) {
+      const m = Number(firstOfMonth.date.slice(5, 7)) - 1;
+      if (m !== lastMonth) { label.textContent = AW_MONTH_NAMES[m]; lastMonth = m; }
+    }
+    months.appendChild(label);
+    for (const cell of weekCells) {
+      const div = document.createElement('div');
+      div.className = 'aw-cell';
+      div.dataset.level = String(awLevel(cell.turns, summary.maxTurns));
+      const [y, m, d] = cell.date.split('-');
+      div.title = `${cell.turns} turn${cell.turns === 1 ? '' : 's'} on ${m}/${d}/${y}`;
+      grid.appendChild(div);
+    }
+  }
+}
+
+async function refreshActivityWidget() {
+  try {
+    const summary = await window.vc.getActivitySummary();
+    renderActivityWidget(summary);
+  } catch { /* best-effort */ }
+}
+
+function setupActivityWidget() {
+  const panel = $('#activity-widget');
+  if (!panel) return;
+  $('#aw-summary-btn').addEventListener('click', () => panel.classList.toggle('collapsed'));
+  $('#aw-dock').addEventListener('click', (e) => { e.stopPropagation(); dockWidget('activity-widget', 'wb-activity'); });
+  refreshActivityWidget();
+}
+
 function setupMediaPlayer() {
   const panel = $('#media-player');
   if (!panel) return;
@@ -1876,6 +1993,7 @@ function setupMediaPlayer() {
     panel.classList.toggle('collapsed', mpCollapsed);
     setTimeout(() => mpViz && mpViz.resize(), 30);
   });
+  $('#mp-dock').addEventListener('click', (e) => { e.stopPropagation(); dockWidget('media-player', 'wb-media'); });
 
   // progress bar scrubbing
   const mkBar = (e) => {
@@ -1923,6 +2041,8 @@ async function boot() {
   setInterval(tickFocusCountdowns, 1000);
   await loadModels();
   setupMediaPlayer();
+  setupActivityWidget();
+  setupWidgetBar();
   // Set initial model name
   if (snap?.provider) {
     $('#model-name').textContent = `${snap.provider.name}/${snap.provider.model}`;

@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('vc', {
 
   createContainer: (name) => ipcRenderer.invoke('container:create', { name }),
   addContainerRefs: (id) => ipcRenderer.invoke('container:addRefs', { id }),
+  addContainerRefPaths: (id, paths) => ipcRenderer.invoke('container:addRefPaths', { id, paths }),
   removeContainerRef: (id, refId) => ipcRenderer.invoke('container:removeRef', { id, refId }),
   reindexContainer: (id) => ipcRenderer.invoke('container:reindex', { id }),
   openContainer: (id) => ipcRenderer.invoke('container:open', id),
@@ -57,6 +58,7 @@ contextBridge.exposeInMainWorld('vc', {
 
   getCostSummary: () => ipcRenderer.invoke('cost:summary'),
   rebuildCost: () => ipcRenderer.invoke('cost:rebuild'),
+  getActivitySummary: () => ipcRenderer.invoke('activity:summary'),
 
   submitBugReport: (data) => ipcRenderer.invoke('bugreport:submit', data),
   openBugReportUrl: (url) => ipcRenderer.invoke('bugreport:openUrl', url),
