@@ -284,6 +284,13 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
   border: 1px solid var(--border);
 }
 #settings-btn:hover { color: var(--text); border-color: var(--accent); }
+#bugreport-btn {
+  margin: 0 8px 8px; padding: 6px; border-radius: 3px; font-size: 13px;
+  color: var(--dim); display: flex; align-items: center; gap: 8px; justify-content: center;
+  border: 1px solid var(--border);
+}
+#bugreport-btn svg { flex-shrink: 0; }
+#bugreport-btn:hover { color: var(--text); border-color: var(--accent); }
 
 /* ---------------- chat column ---------------- */
 #chat-col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -554,6 +561,29 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 #sched-save { background: var(--accent); color: var(--accent-ink); padding: 7px 16px; border-radius: 3px; font-weight: 600; }
 #sched-cancel { color: var(--dim); padding: 7px 12px; }
 
+/* bug report modal */
+#bugreport-backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+#bugreport-modal {
+  width: 520px; background: var(--bg1); border: 1px solid var(--border); border-radius: 4px;
+  padding: 16px 18px;
+}
+#bugreport-modal h2 { font-size: 17px; margin-bottom: 4px; }
+#bugreport-result {
+  margin-top: 10px; padding: 8px 10px; border-radius: 3px;
+  background: var(--bg2); border: 1px solid var(--border); word-break: break-word;
+}
+#bugreport-result.ok { color: var(--green); border-color: var(--green); }
+#bugreport-result.err { color: var(--red); border-color: var(--red); }
+#bugreport-result a { color: inherit; text-decoration: underline; }
+#bugreport-footer { display: flex; gap: 8px; margin-top: 12px; align-items: center; }
+#bugreport-send { background: var(--accent); color: var(--accent-ink); padding: 7px 16px; border-radius: 3px; font-weight: 600; }
+#bugreport-send:disabled { opacity: 0.6; cursor: default; }
+#bugreport-close { color: var(--dim); padding: 7px 12px; }
+#bugreport-saved { color: var(--green); font-size: 13px; }
+
 .todo-item { display: flex; gap: 8px; padding: 4px; font-size: 13px; align-items: baseline; }
 .todo-item .t-mark { flex-shrink: 0; }
 .todo-item.done { color: var(--faint); text-decoration: line-through; }
@@ -657,6 +687,14 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
   padding: 16px 18px;
 }
 #model-modal h2 { font-size: 17px; margin-bottom: 4px; }
+.model-filter-bar { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.model-filter {
+  padding: 5px 10px; font-size: 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--bg2); color: var(--dim);
+  cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.model-filter:hover { border-color: var(--accent); color: var(--text); }
+.model-filter.active { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
 .model-list { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .model-item {
   display: flex; align-items: center; gap: 10px; padding: 10px 12px;
@@ -813,7 +851,7 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 }
 
 /* ---------------- quiet motion ---------------- */
-#project-btn, #new-session, #settings-btn, .cbtn, .session-item,
+#project-btn, #new-session, #settings-btn, #bugreport-btn, .cbtn, .session-item,
 #model-select-btn, .portal-btn, #input, .sched-card .sc-actions button,
 #home-btn, #desktop-add-btn, #desktop-add-container-btn, .desktop-icon {
   transition: border-color var(--ease), color var(--ease), background var(--ease);
@@ -822,10 +860,10 @@ button { font: inherit; cursor: pointer; border: none; background: none; color: 
 .msg-user, .msg-assistant, .tool-card, .perm-card, .sys-note {
   animation: rise-in 180ms ease;
 }
-#modal-backdrop:not(.hidden), #sched-backdrop:not(.hidden), #model-backdrop:not(.hidden) {
+#modal-backdrop:not(.hidden), #sched-backdrop:not(.hidden), #model-backdrop:not(.hidden), #bugreport-backdrop:not(.hidden) {
   animation: fade-in 160ms ease;
 }
-#settings-modal, #sched-modal, #model-modal { animation: pop-in 180ms ease; }
+#settings-modal, #sched-modal, #model-modal, #bugreport-modal { animation: pop-in 180ms ease; }
 #orb.thinking { box-shadow: 0 0 12px var(--glow); }
 
 @keyframes rise-in {

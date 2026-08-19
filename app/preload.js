@@ -58,6 +58,9 @@ contextBridge.exposeInMainWorld('vc', {
   getCostSummary: () => ipcRenderer.invoke('cost:summary'),
   rebuildCost: () => ipcRenderer.invoke('cost:rebuild'),
 
+  submitBugReport: (data) => ipcRenderer.invoke('bugreport:submit', data),
+  openBugReportUrl: (url) => ipcRenderer.invoke('bugreport:openUrl', url),
+
   getFocusList: () => ipcRenderer.invoke('focus:list'),
   getFocusDetail: (id) => ipcRenderer.invoke('focus:detail', { id }),
   focusAnswer: (id, answer) => ipcRenderer.invoke('focus:answer', { id, answer }),

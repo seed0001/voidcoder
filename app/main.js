@@ -951,6 +951,25 @@ ipcMain.handle('agent:structure', () => {
   }
 });
 
+// ---------------------------------------------------------------- bug report IPC
+
+const { submitBugReport, REPO_OWNER, REPO_NAME } = require('../src/bugReport');
+
+ipcMain.handle('bugreport:submit', async (e, { title, description, category }) => {
+  let providerName = null;
+  try { providerName = config.resolveProvider(cfg).name; } catch {}
+  const context = { provider: providerName, model: cfg.model };
+  return submitBugReport(cfg, { title, description, category, context, submittedBy: 'user' });
+});
+
+// Only ever opens a github.com/seed0001/voidcoder issue URL — either one we
+// generated ourselves (the manual "new issue" fallback) or the filed issue's
+// own URL returned by the GitHub API — never an arbitrary renderer-supplied URL.
+ipcMain.handle('bugreport:openUrl', (e, url) => {
+  if (typeof url !== 'string' || !url.startsWith(`https://github.com/${REPO_OWNER}/${REPO_NAME}/issues`)) return;
+  shell.openExternal(url);
+});
+
 ipcMain.handle('cost:summary', () => costTracker.load(cwd));
 
 ipcMain.handle('cost:rebuild', () => {

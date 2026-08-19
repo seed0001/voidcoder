@@ -450,6 +450,7 @@ async function sendText(text, images = pendingImages) {
   const res = await window.vc.send(payload);
   finalizeStream();
   if (res?.error) note(`error: ${res.error}`);
+  if (res?.interrupted) note('⏹ stopped — canceled by user');
   if (res?.snapshot) {
     snap = res.snapshot;
     renderSessions();
@@ -660,6 +661,63 @@ async function saveSchedTask() {
     renderSchedule();
   } catch (err) {
     $('#sched-saved').textContent = `Error: ${err.message}`;
+  }
+}
+
+// ============================================================ bug report modal
+
+function openBugReportModal() {
+  $('#br-category').value = 'bug';
+  $('#br-title').value = '';
+  $('#br-description').value = '';
+  $('#bugreport-saved').textContent = '';
+  const result = $('#bugreport-result');
+  result.classList.add('hidden');
+  result.className = 'set-note hidden';
+  result.innerHTML = '';
+  $('#bugreport-send').disabled = false;
+  $('#bugreport-backdrop').classList.remove('hidden');
+  $('#br-description').focus();
+}
+
+function showBugReportResult(ok, html) {
+  const result = $('#bugreport-result');
+  result.className = `set-note ${ok ? 'ok' : 'err'}`;
+  result.innerHTML = html;
+}
+
+async function submitBugReportForm() {
+  const category = $('#br-category').value;
+  const title = $('#br-title').value.trim();
+  const description = $('#br-description').value.trim();
+  if (!description) { $('#bugreport-saved').textContent = 'Description required'; return; }
+
+  $('#bugreport-send').disabled = true;
+  $('#bugreport-saved').textContent = 'Submitting…';
+  try {
+    const res = await window.vc.submitBugReport({ title, description, category });
+    if (res.ok) {
+      $('#bugreport-saved').textContent = '';
+      showBugReportResult(true, `Filed as <a href="#" id="br-issue-link">issue #${res.number}</a>.`);
+      $('#br-issue-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        window.vc.openBugReportUrl(res.url);
+      });
+    } else if (res.manualUrl) {
+      $('#bugreport-saved').textContent = '';
+      showBugReportResult(false, `No GitHub token configured — <a href="#" id="br-manual-link">click to file it manually</a> in your browser.`);
+      $('#br-manual-link').addEventListener('click', (e) => {
+        e.preventDefault();
+        window.vc.openBugReportUrl(res.manualUrl);
+      });
+    } else {
+      $('#bugreport-saved').textContent = '';
+      showBugReportResult(false, `Failed: ${res.error}`);
+    }
+  } catch (err) {
+    showBugReportResult(false, `Failed: ${err.message}`);
+  } finally {
+    $('#bugreport-send').disabled = false;
   }
 }
 
@@ -1319,6 +1377,14 @@ function bind() {
     $('#sched-cron-wrap').classList.toggle('hidden', !isCron);
     $('#sched-interval-wrap').classList.toggle('hidden', isCron);
   });
+
+  // bug report modal
+  $('#bugreport-btn').addEventListener('click', openBugReportModal);
+  $('#bugreport-send').addEventListener('click', submitBugReportForm);
+  $('#bugreport-close').addEventListener('click', () => $('#bugreport-backdrop').classList.add('hidden'));
+  $('#bugreport-backdrop').addEventListener('click', (e) => {
+    if (e.target.id === 'bugreport-backdrop') $('#bugreport-backdrop').classList.add('hidden');
+  });
 }
 
 // ============================================================ focus panel
@@ -1596,6 +1662,7 @@ function setupFocusEvents() {
 
 let modelList = [];
 let selectedModelId = null;
+let modelFilter = 'all';
 
 async function loadModels() {
   try {
@@ -1606,14 +1673,35 @@ async function loadModels() {
   }
 }
 
+function matchesModelFilter(m, filter) {
+  switch (filter) {
+    case 'claude': return m.provider === 'claude';
+    case 'local': return !!m.local;
+    case 'or-paid': return m.provider === 'openrouter' && m.costCategory !== 'free';
+    case 'or-free': return m.provider === 'openrouter' && m.costCategory === 'free';
+    default: return true;
+  }
+}
+
+function renderModelFilterBar() {
+  $$('.model-filter').forEach((btn) => {
+    const filter = btn.dataset.filter;
+    const count = modelList.filter((m) => matchesModelFilter(m, filter)).length;
+    btn.textContent = `${btn.textContent.replace(/\s*\(\d+\)$/, '')} (${count})`;
+    btn.classList.toggle('active', filter === modelFilter);
+  });
+}
+
 function renderModelSelector() {
   const container = $('#model-list');
   if (!container) return;
-  if (!modelList.length) {
-    container.innerHTML = '<div class="fp-empty">No models available. The catalog pulls live from OpenRouter and local servers.</div>';
+  renderModelFilterBar();
+  const filtered = modelList.filter((m) => matchesModelFilter(m, modelFilter));
+  if (!filtered.length) {
+    container.innerHTML = `<div class="fp-empty">No models in this filter${modelList.length ? ' — try "All".' : '. The catalog pulls live from OpenRouter and local servers.'}</div>`;
     return;
   }
-  container.innerHTML = modelList.map(m => `
+  container.innerHTML = filtered.map(m => `
     <div class="model-item${m.id === selectedModelId ? ' selected' : ''}" data-id="${m.id}">
       <div class="model-item-info">
         <div class="model-item-id">${m.id}</div>
@@ -1687,6 +1775,12 @@ function setupModelSelector() {
   $('#model-close').addEventListener('click', () => $('#model-backdrop').classList.add('hidden'));
   $('#model-backdrop').addEventListener('click', (e) => {
     if (e.target.id === 'model-backdrop') $('#model-backdrop').classList.add('hidden');
+  });
+  $$('.model-filter').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      modelFilter = btn.dataset.filter;
+      renderModelSelector();
+    });
   });
 }
 

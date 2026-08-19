@@ -45,6 +45,10 @@
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         Settings
       </button>
+      <button id="bugreport-btn" title="Report a bug or request a feature">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 2v3M16 2v3M12 8v4M9 21h6a2 2 0 0 0 2-2v-6a5 5 0 0 0-10 0v6a2 2 0 0 0 2 2z"/><path d="M4 12h2M18 12h2M5 6l1.5 1.5M19 6l-1.5 1.5M5 18l1.5-1.5M19 18l-1.5-1.5"/></svg>
+        Report bug
+      </button>
     </aside>
 
     <main id="chat-col">
@@ -380,11 +384,47 @@
   </div>
 </div>
 
+<!-- Bug report modal -->
+<div id="bugreport-backdrop" class="hidden">
+  <div id="bugreport-modal">
+    <h2>Report a bug</h2>
+    <div class="set-note">Files a GitHub issue in the VoidCode repo so it can be tracked.</div>
+    <div class="set-grid">
+      <label>Type
+        <select id="br-category">
+          <option value="bug" selected>Bug</option>
+          <option value="feature-request">Feature request</option>
+          <option value="question">Question</option>
+        </select>
+      </label>
+      <label class="wide">Title <span class="set-note" style="margin:0">(optional)</span>
+        <input id="br-title" placeholder="Short summary" maxlength="120" />
+      </label>
+      <label class="wide">Description
+        <textarea id="br-description" rows="5" placeholder="What happened? Steps to reproduce, expected vs. actual behavior."></textarea>
+      </label>
+    </div>
+    <div id="bugreport-result" class="set-note hidden"></div>
+    <div id="bugreport-footer">
+      <button id="bugreport-send">Submit report</button>
+      <button id="bugreport-close">Close</button>
+      <span id="bugreport-saved"></span>
+    </div>
+  </div>
+</div>
+
 <!-- Model selector modal -->
 <div id="model-backdrop" class="hidden">
   <div id="model-modal">
     <h2>Model &amp; Agents</h2>
     <div class="set-note">The live catalog (OpenRouter + local models). Pick a model for the main agent, or tell the agent in conversation which model each role should use.</div>
+    <div id="model-filter-bar" class="model-filter-bar">
+      <button class="model-filter active" data-filter="all">All</button>
+      <button class="model-filter" data-filter="claude">Claude</button>
+      <button class="model-filter" data-filter="or-paid">OpenRouter (paid)</button>
+      <button class="model-filter" data-filter="or-free">OpenRouter (free)</button>
+      <button class="model-filter" data-filter="local">Local</button>
+    </div>
     <div id="model-list" class="model-list"></div>
     <div id="agent-structure" class="agent-structure hidden"></div>
     <div id="model-footer">

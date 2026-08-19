@@ -486,9 +486,19 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
   // ---- the loop -----------------------------------------------------------
 
   async _loop(messages, tools, { systemPrompt, maxRounds, autonomous = false, quiet = false, kind = 'main', provider = null, streamTools = false, allowsHandoff = false, organismTask = null, taskLabel = null }) {
-    // Save/restore the abort controller so subagents don't clobber the parent.
+    // Share ONE abort controller for the whole call tree of this turn — the
+    // main loop, a subagent's loop (runSubagent), and the worker's loop
+    // (runWorker) all reuse it instead of each nesting level minting its own.
+    // Previously each nested _loop() call replaced this.abort with a fresh
+    // controller and restored the old one on the way out, so stop() (which
+    // just calls this.abort?.abort()) only ever cancelled whichever loop was
+    // innermost at the moment of the click — the moment that inner call
+    // returned, its parent's own (never-aborted) local `abort` reference took
+    // back over and the turn continued as if nothing happened. Reusing the
+    // same controller at every nesting level means one stop() cancels every
+    // level at once.
     const prevAbort = this.abort;
-    const abort = (this.abort = new AbortController());
+    const abort = prevAbort || (this.abort = new AbortController());
     // This loop's provider: a worker/subagent override, or the chat provider.
     // Reassignable — a detected model collapse (see below) swaps it mid-loop.
     let prov = provider || this.provider;
@@ -926,7 +936,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
               ok = false;
               output = 'DENIED: the user did not permit this action. Do not retry it; adjust your approach or ask.';
             } else {
-              output = await executor(args);
+              output = await executor(args, { signal: abort.signal });
             }
           } catch (err) {
             ok = false;
@@ -945,7 +955,14 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
 
       if (abort.signal.aborted) {
         messages.push({ role: 'user', content: '[Interrupted by user]' });
-        break;
+        // Throw (rather than break-and-return) so this behaves the same as a
+        // mid-stream abort: it propagates all the way out to send() and lets
+        // the caller (runChat in app/main.js) recognize the AbortError and
+        // report the turn as interrupted, instead of quietly resolving as a
+        // normal, ordinary completion with an empty reply.
+        const abortErr = new Error('Aborted by user');
+        abortErr.name = 'AbortError';
+        throw abortErr;
       }
     }
     } finally {

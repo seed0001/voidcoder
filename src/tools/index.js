@@ -9,6 +9,7 @@ const todoTool = require('./todoTool');
 const memoryTool = require('./memoryTool');
 const scheduleTool = require('./scheduleTool');
 const costTool = require('./costTool');
+const bugReportTool = require('./bugReportTool');
 const contextTools = require('./contextTools');
 const organismTool = require('./organismTool');
 const mcp = require('../mcp');
@@ -48,6 +49,7 @@ function build(ctx, { mcpServers = [], includeTask = true, includeFocus = false,
     ...memoryTool.defs,
     ...scheduleTool.defs,
     ...costTool.defs,
+    ...bugReportTool.defs,
   ];
   if (includeContext && ctx.contextResolver) defs.push(...contextTools.CONTEXT_DEFS);
   const executors = {
@@ -59,6 +61,7 @@ function build(ctx, { mcpServers = [], includeTask = true, includeFocus = false,
     ...memoryTool.makeExecutors(ctx),
     ...scheduleTool.makeExecutors(ctx),
     ...costTool.makeExecutors(ctx),
+    ...bugReportTool.makeExecutors(ctx),
   };
   if (includeContext && ctx.contextResolver) Object.assign(executors, contextTools.makeExecutors(ctx));
 
@@ -112,6 +115,7 @@ function build(ctx, { mcpServers = [], includeTask = true, includeFocus = false,
       log_lesson: 'Record a behavioral lesson (if trigger then behavior).',
       list_lessons: 'List saved behavioral lessons.',
       cost_query: 'Query spending and active time stats.',
+      submit_bug_report: 'File a bug report / feature request as a tracked GitHub issue.',
       schedule: 'Schedule a task or timer.',
       schedule_remove: 'Cancel a scheduled task.',
       schedule_show: 'Show details of scheduled tasks.',
@@ -175,6 +179,7 @@ function allToolNames() {
     ...memoryTool.defs,
     ...scheduleTool.defs,
     ...costTool.defs,
+    ...bugReportTool.defs,
     ...contextTools.CONTEXT_DEFS,
     ...FOCUS_DEFS,
     ...MODEL_DEFS,
