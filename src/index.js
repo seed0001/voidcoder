@@ -96,14 +96,35 @@ async function main() {
     process.exit(1);
   }
 
-  // ---- MCP ----
-  const { servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers);
-
   // ---- interactive vs print mode ----
   const interactive = !args.print;
   const spinner = new ui.Spinner('thinking');
   let rl = null;
   let generating = false;
+
+  // ---- MCP ----
+  // Project-local mcpServers entries spawn arbitrary external processes on
+  // startup — confirm once per untrusted project before doing that (a
+  // separate, throwaway readline so this doesn't depend on the main REPL
+  // interface, which isn't created until later). Non-interactive (-p) runs
+  // have nobody to ask, so untrusted servers are skipped rather than assumed.
+  const mcpUntrustedNames = cfg._trustedMcpProjects.includes(cfg._projectPath) ? [] : cfg._projectMcpServerNames;
+  const { servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers, {
+    untrustedNames: mcpUntrustedNames,
+    confirmFn: async (name, spec) => {
+      if (!interactive) return false;
+      const tmpRl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const ans = await new Promise((resolve) => {
+        tmpRl.question(
+          `${c.warn('mcp')} project-defined server ${c.bold(name)} (${spec.command} ${(spec.args || []).join(' ')}) wants to start.\n  ${c.muted('[y] once  [a] always trust this project  [n] deny')} `,
+          (a) => resolve((a || 'n').trim().toLowerCase()[0] || 'n')
+        );
+      });
+      tmpRl.close();
+      if (ans === 'a') { config.trustMcpProject(cfg._projectPath); return true; }
+      return ans === 'y';
+    },
+  });
 
   const promptPermission = async (question) => {
     spinner.stop();

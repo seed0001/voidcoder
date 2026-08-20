@@ -23,6 +23,19 @@ function patternToRegex(pattern) {
   return new RegExp(`^${esc}$`, 'i');
 }
 
+// bashAllow patterns (e.g. 'git status*') are meant to skip the prompt for a
+// single simple command, not for anything that can be chained onto it. Since
+// the whole raw command string is handed to a real shell (bashTool.js), a
+// pattern match alone is not enough: 'git status; rm -rf /' matches
+// 'git status*' textually while doing something the pattern never intended
+// to authorize. Any shell chaining/substitution metacharacter anywhere in
+// the command disqualifies it from an allowlist auto-approval — it always
+// falls through to an explicit prompt instead.
+const SHELL_CHAINING_RE = /[;&|`\n<>]|\$\(/;
+function isShellChained(command) {
+  return SHELL_CHAINING_RE.test(command || '');
+}
+
 function matchesAnyGlob(filePath, globs) {
   const normalized = filePath.replace(/\\/g, '/');
   for (const g of globs) {
@@ -94,7 +107,7 @@ class Permissions {
     if (this.sessionAllow.has(toolName)) return true;
 
     // ---- bash allow patterns ----
-    if (cat === 'bash' && this.bashAllowRes.some((re) => re.test(args.command || ''))) return true;
+    if (cat === 'bash' && !isShellChained(args.command) && this.bashAllowRes.some((re) => re.test(args.command || ''))) return true;
 
     // ---- autonomous mode (non-interactive) ----
     if (autonomous) return false;
@@ -113,4 +126,4 @@ class Permissions {
   }
 }
 
-module.exports = { Permissions };
+module.exports = { Permissions, patternToRegex, isShellChained };

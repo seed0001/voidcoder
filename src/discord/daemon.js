@@ -92,7 +92,12 @@ async function main() {
     partials: [Partials.Channel], // required to receive DM messageCreate events for uncached DM channels
   });
 
-  const { servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers);
+  // Headless daemon — nobody to prompt, so project-local (untrusted)
+  // mcpServers entries are skipped rather than auto-started. Trust a project
+  // via `config.trustMcpProject(path)` (e.g. through the terminal's
+  // interactive prompt) to have the daemon start its servers too.
+  const mcpUntrustedNames = cfg._trustedMcpProjects.includes(cfg._projectPath) ? [] : cfg._projectMcpServerNames;
+  const { servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers, { untrustedNames: mcpUntrustedNames });
   for (const e of mcpErrors) console.warn(`mcp: ${e}`);
 
   const sessionRegistry = new SessionRegistry({ cfg, mcpServers, client });

@@ -510,22 +510,28 @@ class FocusSession {
       }
 
       // Digital-organism mode: debit the shared treasury for this focus round.
-      if (organism && orgGuard && result?.usage) {
+      // Runs even without `usage` (local models often omit it) so the loop
+      // guard (per-task cap, unproductive-round stop) keeps enforcing;
+      // only the dollar-cost ledger charge is skipped when there's nothing
+      // to price.
+      if (organism && orgGuard) {
         try {
-          const costUSD = typeof result.usage.total_cost === 'number'
-            ? result.usage.total_cost
-            : await organism._computeCallCost(turnProvider, result.usage);
+          const costUSD = result?.usage
+            ? (typeof result.usage.total_cost === 'number' ? result.usage.total_cost : await organism._computeCallCost(turnProvider, result.usage))
+            : 0;
           const progress = result.toolCalls.length > 0 || (result.content && result.content.trim());
           orgGuard.chargeRound(costUSD, { progress });
-          await organism.charge({
-            costUSD,
-            model: turnProvider ? `${turnProvider.name}/${turnProvider.model}` : null,
-            input: result.usage.prompt_tokens || 0,
-            output: result.usage.completion_tokens || 0,
-            kind: 'focus',
-            actor: this.id,
-            task: `focus: ${this.description || this.prompt}`,
-          });
+          if (result?.usage) {
+            await organism.charge({
+              costUSD,
+              model: turnProvider ? `${turnProvider.name}/${turnProvider.model}` : null,
+              input: result.usage.prompt_tokens || 0,
+              output: result.usage.completion_tokens || 0,
+              kind: 'focus',
+              actor: this.id,
+              task: `focus: ${this.description || this.prompt}`,
+            });
+          }
         } catch (orgErr) {
           if (orgErr.organismBudgetStop || /Insufficient treasury balance/.test(orgErr.message)) {
             this.addLog(`organism budget stop: ${orgErr.message}`);

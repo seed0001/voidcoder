@@ -13,6 +13,19 @@ function expand(p, base) {
   return path.resolve(base || process.cwd(), p);
 }
 
+// write/edit must not escape the project directory — an absolute path or a
+// `..` traversal in a model-chosen filePath would otherwise let write/edit
+// touch anything the OS user can, with no confinement and (by default) no
+// permission prompt. Enforced here unconditionally, independent of the
+// permission mode.
+function assertConfined(resolved, base) {
+  const root = path.resolve(base || process.cwd());
+  const rel = path.relative(root, resolved);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    throw new Error(`Refusing to write outside the project directory: ${resolved} (project root: ${root})`);
+  }
+}
+
 const MAX_READ = 250000;
 
 const defs = [
@@ -78,6 +91,7 @@ function makeExecutors(ctx) {
 
     write({ filePath, content }) {
       const p = expand(filePath, ctx.cwd);
+      assertConfined(p, ctx.cwd);
       const old = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
       fs.mkdirSync(path.dirname(p), { recursive: true });
       fs.writeFileSync(p, content, 'utf8');
@@ -87,6 +101,7 @@ function makeExecutors(ctx) {
 
     edit({ filePath, oldString, newString, replaceAll = false }) {
       const p = expand(filePath, ctx.cwd);
+      assertConfined(p, ctx.cwd);
       if (oldString === newString) throw new Error('oldString and newString are identical.');
       const current = fs.readFileSync(p, 'utf8');
       const count = current.split(oldString).length - 1;
@@ -108,4 +123,4 @@ function makeExecutors(ctx) {
   };
 }
 
-module.exports = { defs, makeExecutors, expand };
+module.exports = { defs, makeExecutors, expand, assertConfined };

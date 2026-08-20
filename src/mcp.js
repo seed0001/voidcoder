@@ -110,11 +110,28 @@ class McpServer {
 }
 
 // Start all configured servers; failures are collected, not fatal.
-async function startServers(mcpConfig) {
+//
+// opts.untrustedNames: server names sourced from a project-local .voidcode.json
+// that hasn't been explicitly trusted (see config.js _projectMcpServerNames /
+// _trustedMcpProjects). These spawn arbitrary external processes on startup —
+// a shared/booby-trapped project could otherwise get code execution just by
+// being opened, with no prompt at all. opts.confirmFn(name, spec) => boolean
+// (or a Promise of one) is awaited for each untrusted name before starting it;
+// with no confirmFn (e.g. a headless daemon with nobody to ask), untrusted
+// servers are skipped entirely — fail closed, not fail open.
+async function startServers(mcpConfig, { untrustedNames = [], confirmFn = null } = {}) {
   const servers = [];
   const errors = [];
+  const untrusted = new Set(untrustedNames);
   for (const [name, spec] of Object.entries(mcpConfig || {})) {
     if (!spec || !spec.command) continue;
+    if (untrusted.has(name)) {
+      const allowed = confirmFn ? await confirmFn(name, spec) : false;
+      if (!allowed) {
+        errors.push(`${name}: skipped — project-defined MCP server, not trusted (set via the startup prompt, or add the project to trustedMcpProjects in ~/.voidcode/config.json)`);
+        continue;
+      }
+    }
     const server = new McpServer(name, spec);
     try {
       await server.start();

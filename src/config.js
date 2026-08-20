@@ -313,6 +313,13 @@ function load(cwd = process.cwd()) {
   const cfg = deepMerge(deepMerge(DEFAULTS, global), project);
   cfg._globalPath = GLOBAL_CONFIG;
   cfg._projectPath = path.join(cwd, '.voidcode.json');
+  // mcpServers spawn arbitrary external processes on startup. Track which
+  // entries came from the project-local (potentially untrusted/shared)
+  // config so callers can gate them behind a prompt instead of auto-starting
+  // them. Trust decisions are read only from the GLOBAL file — a project's
+  // own .voidcode.json must never be able to self-approve its own servers.
+  cfg._projectMcpServerNames = Object.keys(project.mcpServers || {});
+  cfg._trustedMcpProjects = Array.isArray(global.trustedMcpProjects) ? global.trustedMcpProjects : [];
   return cfg;
 }
 
@@ -322,6 +329,15 @@ function saveGlobal(patch) {
   const next = deepMerge(current, patch);
   fs.writeFileSync(GLOBAL_CONFIG, JSON.stringify(next, null, 2), 'utf8');
   return next;
+}
+
+// Remember that the operator explicitly trusted this project's MCP server
+// definitions, so future runs auto-start them without re-prompting.
+function trustMcpProject(projectPath) {
+  const current = readJson(GLOBAL_CONFIG) || {};
+  const list = Array.isArray(current.trustedMcpProjects) ? current.trustedMcpProjects.slice() : [];
+  if (!list.includes(projectPath)) list.push(projectPath);
+  return saveGlobal({ trustedMcpProjects: list });
 }
 
 // Resolve the active provider {name, baseUrl, apiKey, model}.
@@ -369,4 +385,4 @@ function loadProjectInstructions(cwd = process.cwd()) {
   return parts;
 }
 
-module.exports = { load, saveGlobal, resolveProvider, loadProjectInstructions, GLOBAL_DIR, DEFAULTS, ModelRegistry, deepMerge };
+module.exports = { load, saveGlobal, trustMcpProject, resolveProvider, loadProjectInstructions, GLOBAL_DIR, DEFAULTS, ModelRegistry, deepMerge };

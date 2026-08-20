@@ -292,7 +292,15 @@ app.whenReady().then(async () => {
   cwd = cfg.appState?.lastCwd && fs.existsSync(cfg.appState.lastCwd) ? cfg.appState.lastCwd : os.homedir();
   cfg = config.load(cwd);
   voice.init(() => cfg);
-  ({ servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers));
+  // Project-local mcpServers entries spawn arbitrary external processes on
+  // startup. There's no window/renderer to prompt through yet at this point
+  // in the boot sequence, so — same as the headless Discord daemon — an
+  // untrusted project's servers are skipped rather than auto-started. Trust
+  // a project once via the terminal (`voidcode` in that folder, answer 'a'
+  // to the MCP prompt) and the desktop app will honor it from then on, since
+  // trust is stored in the shared global config.
+  const mcpUntrustedNames = cfg._trustedMcpProjects.includes(cfg._projectPath) ? [] : cfg._projectMcpServerNames;
+  ({ servers: mcpServers, errors: mcpErrors } = await mcp.startServers(cfg.mcpServers, { untrustedNames: mcpUntrustedNames }));
   session = new Session(cwd);
   buildAgent();
 

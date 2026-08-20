@@ -662,19 +662,28 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
         if (typeof result.usage.total_cost === 'number') {
           this.session.usage.cost += result.usage.total_cost;
         }
+      }
 
-        // Digital-organism mode: debit the treasury for this model call and
-        // feed the loop guard. Charging is best-effort and must never break the
-        // agent when the catalog or ledger is unavailable — a real failure to
-        // settle a charge (insufficient funds / budget breach) SHOULD stop the
-        // loop so the organism reports a clear, auditable reason.
-        if (this.organism && orgGuard) {
-          try {
-            const costUSD = typeof result.usage.total_cost === 'number'
-              ? result.usage.total_cost
-              : await this.organism._computeCallCost(prov, result.usage);
-            const progress = result.toolCalls.length > 0 || (result.content && result.content.trim());
-            orgGuard.chargeRound(costUSD, { progress });
+      // Digital-organism mode: debit the treasury for this model call and
+      // feed the loop guard. Charging is best-effort and must never break the
+      // agent when the catalog or ledger is unavailable — a real failure to
+      // settle a charge (insufficient funds / budget breach) SHOULD stop the
+      // loop so the organism reports a clear, auditable reason.
+      //
+      // This runs even when the provider sent no `usage` (local models via
+      // Ollama/llama.cpp routinely don't) — with $0 charged in that case,
+      // since there are no token counts to price. Charging nothing is fine;
+      // silently skipping the loop guard is not: it's what let a local-model
+      // organism run past its per-task cap and unproductive-round limit with
+      // zero enforcement. progress still gates the loop guard normally.
+      if (this.organism && orgGuard) {
+        try {
+          const costUSD = result.usage
+            ? (typeof result.usage.total_cost === 'number' ? result.usage.total_cost : await this.organism._computeCallCost(prov, result.usage))
+            : 0;
+          const progress = result.toolCalls.length > 0 || (result.content && result.content.trim());
+          orgGuard.chargeRound(costUSD, { progress });
+          if (result.usage) {
             await this.organism.charge({
               costUSD,
               model: prov ? `${prov.name}/${prov.model}` : null,
@@ -684,10 +693,10 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
               actor: this.toolCtx.agentKind || 'main',
               task: organismTask || (this.session && this.session.title) || kind,
             });
-          } catch (err) {
-            if (err.organismBudgetStop || /Insufficient treasury balance/.test(err.message)) throw err;
-            // Transient (e.g. catalog/pricing fetch failed) — don't stop the loop.
           }
+        } catch (err) {
+          if (err.organismBudgetStop || /Insufficient treasury balance/.test(err.message)) throw err;
+          // Transient (e.g. catalog/pricing fetch failed) — don't stop the loop.
         }
       }
 
