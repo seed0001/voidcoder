@@ -2,7 +2,7 @@
 // Same engine as the terminal (src/*): agent loop, tools, sessions,
 // permissions, MCP. This file is only wiring + window.
 
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -31,64 +31,6 @@ app.setPath('cache', cacheDir);
 app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
 app.commandLine.appendSwitch('disable-gpu-program-cache');
 app.commandLine.appendSwitch('disk-cache-size', '0');
-
-// ---------------------------------------------------------------- corner media player
-// Serve the user's own local music files to the renderer over a custom
-// `mediafile://` scheme so they stream under the app's strict CSP. Nothing is
-// ever written or executed: we only read audio files from disk.
-const AUDIO_EXTS = new Set(['.mp3', '.ogg', '.oga', '.wav', '.m4a', '.aac', '.flac', '.opus', '.webm']);
-
-function isAudioFile(p) {
-  return AUDIO_EXTS.has((path.extname(p) || '').toLowerCase());
-}
-
-let mediaFolder = null;              // currently imported music folder (absolute)
-
-// Recursively collect playable audio files under a folder (no symlinks, bounded).
-function scanAudioFolder(root, limit = 5000) {
-  const out = [];
-  const seen = new Set();
-  const walk = (dir) => {
-    let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch { return; }
-    for (const ent of entries) {
-      if (out.length >= limit) return;
-      const full = path.join(dir, ent.name);
-      try { const st = fs.statSync(full); if (st.isSymbolicLink()) continue; } catch { continue; }
-      if (ent.isDirectory()) walk(full);
-      else if (ent.isFile() && isAudioFile(ent.name)) out.push(full);
-    }
-  };
-  walk(root);
-  return out;
-}
-
-// Register the custom scheme as privileged BEFORE the app is ready (required).
-// The matching handler is installed in whenReady via protocol.handle().
-protocol.registerSchemesAsPrivileged([
-  { scheme: 'mediafile', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
-]);
-
-const registerMediaProtocol = () => {
-  // handler uses net.fetch for reliability + range support (seeking)
-  protocol.handle('mediafile', (request) => {
-    try {
-      const url = new URL(request.url);
-      if (url.hostname !== 'local') return new Response('forbidden', { status: 403 });
-      const file = path.normalize(decodeURIComponent(url.pathname).replace(/^\/+/, ''));
-      if (!mediaFolder) return new Response('no folder', { status: 404 });
-      // containment check: only serve inside the imported music folder
-      const relCheck = path.relative(mediaFolder, file);
-      if (relCheck.startsWith('..') || path.isAbsolute(relCheck)) return new Response('forbidden', { status: 403 });
-      if (!isAudioFile(file)) return new Response('forbidden', { status: 403 });
-      try { if (!fs.existsSync(file)) return new Response('not found', { status: 404 }); } catch { return new Response('error', { status: 500 }); }
-      return net.fetch('file://' + file.replace(/\\/g, '/'));
-    } catch (err) {
-      return new Response('bad request', { status: 400 });
-    }
-  });
-};
 
 const config = require('../src/config');
 const { Agent, estTokens } = require('../src/agent');
@@ -406,9 +348,6 @@ app.whenReady().then(async () => {
     scheduler.start();
   }
 
-  // ---- media player custom protocol ----
-  registerMediaProtocol();
-
   createWindow();
 }).catch((err) => {
   debugLog('FATAL APP ERROR: ' + (err?.stack || err));
@@ -434,16 +373,6 @@ ipcMain.handle('app:chooseFolder', async () => {
 });
 
 ipcMain.handle('app:openPath', (e, p) => shell.showItemInFolder(p));
-
-// ---------------------------------------------------------------- corner media player IPC
-ipcMain.handle('media:chooseFolder', async () => {
-  const res = await dialog.showOpenDialog(win, { properties: ['openDirectory'], defaultPath: mediaFolder || os.homedir() });
-  if (res.canceled || !res.filePaths[0]) return null;
-  const folder = path.resolve(res.filePaths[0]);
-  mediaFolder = folder;
-  const files = scanAudioFolder(folder);
-  return { folder, files };
-});
 
 // ---------------------------------------------------------------- desktop shell projects
 

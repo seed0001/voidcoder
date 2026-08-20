@@ -1815,67 +1815,6 @@ function setupModelSelector() {
   });
 }
 
-// ============================================================ corner media player
-// A bottom-right media player that imports a local music folder, plays a
-// shuffled playlist, and drives a frequency-reactive ambient visualizer from
-// the live audio spectrum. Media logic lives in mediaPlayer.js + visualizer.js.
-let mp = null;            // MediaPlayer instance
-let mpViz = null;         // visualizer instance
-let mpCollapsed = false;
-let mpEl, mpTitleEl, mpFolderEl, mpMetaEl, mpFillEl;
-let mpDrag = false;
-
-function fmtTime(s) {
-  s = Math.max(0, Math.floor(s || 0));
-  const m = Math.floor(s / 60), sec = s % 60;
-  return `${m}:${String(sec).padStart(2, '0')}`;
-}
-
-function baseName(p) {
-  if (!p) return '';
-  const parts = String(p).split(/[\\/]/);
-  return parts[parts.length - 1];
-}
-
-function renderMp(state) {
-  if (!mpTitleEl) return;
-  const cur = state.current;
-  mpTitleEl.textContent = cur ? baseName(cur) : '—';
-  mpFolderEl.textContent = state.name ? (state.folder || state.name) : 'No music folder';
-  const meta = [];
-  if (state.total) meta.push(`${state.index + 1}/${state.total}`);
-  if (state.playing) meta.push('●');
-  else if (cur) meta.push('Ⅱ');
-  mpMetaEl.textContent = meta.join('  ');
-  // progress bar
-  if (state.duration > 0) {
-    const pct = Math.min(100, (state.position / state.duration) * 100);
-    mpFillEl.style.width = pct + '%';
-  } else {
-    mpFillEl.style.width = '0%';
-  }
-  $('#mp-shuffle').classList.toggle('on', state.shuffle);
-  $('#mp-repeat').classList.toggle('on', state.repeat);
-  // play/pause icon
-  const ic = $('#mp-toggle svg');
-  if (ic) ic.innerHTML = state.playing ? '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>' : '<path d="M8 5v14l11-7z"/>';
-}
-
-async function importMediaFolder() {
-  const res = await window.vc.chooseMediaFolder();
-  if (!res) return;
-  const { folder, files } = res;
-  if (!files || !files.length) {
-    mpTitleEl.textContent = 'No audio found';
-    mpFolderEl.textContent = folder;
-    return;
-  }
-  const name = (String(folder).split(/[\\/]/).pop()) || folder;
-  mp.setFolder(name, files);
-  renderMp(mp.getState());
-  mpTitleEl.textContent = baseName(files[0]) || 'Ready';
-}
-
 // ============================================================ widget bar (dock/undock)
 
 function dockWidget(panelId, iconBtnId) {
@@ -1962,74 +1901,6 @@ function setupActivityWidget() {
   refreshActivityWidget();
 }
 
-function setupMediaPlayer() {
-  const panel = $('#media-player');
-  if (!panel) return;
-  mpEl = panel;
-  mpTitleEl = $('#mp-title');
-  mpFolderEl = $('#mp-folder');
-  mpMetaEl = $('#mp-meta');
-  mpFillEl = $('#mp-fill');
-  const vizu = $('#vizu');
-
-  // create player + visualizer
-  mp = window.MediaPlayer.createMediaPlayer({
-    onState: (s) => renderMp(s),
-    onTrack: () => {},
-  });
-  mpViz = window.createVisualizer(vizu, () => mp.getFrequencyData());
-  mpViz.start();
-
-  // controls
-  $('#mp-open').addEventListener('click', importMediaFolder);
-  $('#mp-toggle').addEventListener('click', () => mp.toggle());
-  $('#mp-next').addEventListener('click', () => mp.next());
-  $('#mp-prev').addEventListener('click', () => mp.prev());
-  $('#mp-shuffle').addEventListener('click', () => { mp.setShuffle(!mp.getState().shuffle); renderMp(mp.getState()); });
-  $('#mp-repeat').addEventListener('click', () => { mp.setRepeat(!mp.getState().repeat); renderMp(mp.getState()); });
-  $('#mp-volume').addEventListener('input', (e) => { mp.setVolume(parseFloat(e.target.value)); });
-  $('#mp-collapse').addEventListener('click', () => {
-    mpCollapsed = !mpCollapsed;
-    panel.classList.toggle('collapsed', mpCollapsed);
-    setTimeout(() => mpViz && mpViz.resize(), 30);
-  });
-  $('#mp-dock').addEventListener('click', (e) => { e.stopPropagation(); dockWidget('media-player', 'wb-media'); });
-
-  // progress bar scrubbing
-  const mkBar = (e) => {
-    const r = panel.querySelector('.mp-bar').getBoundingClientRect();
-    const pct = (e.clientX - r.left) / r.width;
-    const d = mp.getState().duration;
-    if (d > 0) mp.seek(pct * d);
-  };
-  let scrubbing = false;
-  panel.querySelector('.mp-bar').addEventListener('pointerdown', (e) => { scrubbing = true; mkBar(e); });
-  window.addEventListener('pointermove', (e) => { if (scrubbing) mkBar(e); });
-  window.addEventListener('pointerup', () => { scrubbing = false; });
-
-  // drag to move the panel
-  const handle = panel;
-  handle.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('button') || e.target.closest('input') || e.target.closest('canvas') || e.target.closest('.mp-bar')) return;
-    mpDrag = true;
-  });
-  window.addEventListener('pointermove', (e) => {
-    if (!mpDrag) return;
-    const rect = panel.getBoundingClientRect();
-    const c = document.querySelector('.mp-collapse');
-    const cRect = c.getBoundingClientRect();
-    let x = e.clientX - rect.width / 2;
-    let y = e.clientY - cRect.height / 2;
-    x = Math.max(10, Math.min(window.innerWidth - rect.width - 10, x));
-    y = Math.max(10, Math.min(window.innerHeight - rect.height - 10, y));
-    panel.style.left = x + 'px';
-    panel.style.top = y + 'px';
-  });
-  window.addEventListener('pointerup', () => { mpDrag = false; });
-
-  window.addEventListener('resize', () => { if (mpViz) mpViz.resize(); });
-}
-
 async function boot() {
   snap = await window.vc.init();
   showView('desktop');
@@ -2040,7 +1911,6 @@ async function boot() {
   renderFocusPanel();
   setInterval(tickFocusCountdowns, 1000);
   await loadModels();
-  setupMediaPlayer();
   setupActivityWidget();
   setupWidgetBar();
   // Set initial model name

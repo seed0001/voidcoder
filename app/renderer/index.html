@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob: mediafile:; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; img-src 'self' data:;" />
   <title>VoidCode</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -150,43 +150,6 @@
     </aside>
   </div>
 
-  <!-- corner media player: imports a local music folder, plays it, and drives
-       a frequency-reactive visualizer from the live audio spectrum -->
-  <div id="media-player" class="collapsed" title="Media player">
-    <canvas id="vizu"></canvas>
-    <div class="mp-body">
-      <div class="mp-track">
-        <span class="mp-up" id="mp-folder">No music folder</span>
-        <span class="mp-title" id="mp-title">—</span>
-        <span class="mp-meta" id="mp-meta"></span>
-      </div>
-      <div class="mp-controls">
-        <button class="mp-open" id="mp-open" title="Import a music folder">
-          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
-        </button>
-        <button class="mp-btn" id="mp-prev" title="Previous">
-          <svg viewBox="0 0 24 24"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
-        </button>
-        <button class="mp-btn" id="mp-toggle" title="Play / Pause">
-          <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        </button>
-        <button class="mp-btn" id="mp-next" title="Next">
-          <svg viewBox="0 0 24 24"><path d="M13 5l5 4v6l-5 4V5z"/><path d="M10 5v14H6V5h4z"/></svg>
-        </button>
-      </div>
-      <div class="mp-options">
-        <button id="mp-shuffle" class="mp-sopt on" title="Shuffle">⇄</button>
-        <button id="mp-repeat" class="mp-sopt" title="Repeat">↻</button>
-        <label class="mp-vol" title="Volume">
-          <input type="range" id="mp-volume" min="0" max="1" step="0.01" value="0.8" />
-        </label>
-      </div>
-      <div class="mp-bar"><div class="mp-fill" id="mp-fill"></div></div>
-    </div>
-    <button class="mp-collapse" id="mp-collapse" title="Collapse / expand">«</button>
-    <button class="widget-dock-btn" id="mp-dock" title="Minimize to widget bar">–</button>
-  </div>
-
   <!-- activity widget: a GitHub-style contribution graph of agent turns per
        day, aggregated across every project. -->
   <div id="activity-widget" class="collapsed" title="Activity">
@@ -211,10 +174,9 @@
     </div>
   </div>
 
-  <!-- widget bar: minimized widgets (media player, activity) dock here as
-       small circular icons, out of the way, until clicked to restore. -->
+  <!-- widget bar: minimized widgets (activity) dock here as small circular
+       icons, out of the way, until clicked to restore. -->
   <div id="widget-bar" class="hidden">
-    <button class="wb-icon hidden" id="wb-media" title="Media player" data-widget="media-player">🎵</button>
     <button class="wb-icon hidden" id="wb-activity" title="Activity" data-widget="activity-widget">🔥</button>
   </div>
 </div>
@@ -468,8 +430,6 @@
 <script src="md.js"></script>
 <script src="diff.js"></script>
 <script src="voice.js"></script>
-<script src="mediaPlayer.js"></script>
-<script src="visualizer.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

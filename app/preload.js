@@ -29,8 +29,6 @@ contextBridge.exposeInMainWorld('vc', {
   getContainerStatus: (id) => ipcRenderer.invoke('container:status', id),
   getContainerRelationships: (id) => ipcRenderer.invoke('container:relationships', id),
 
-  chooseMediaFolder: () => ipcRenderer.invoke('media:chooseFolder'),
-
   send: (payload) => ipcRenderer.invoke('chat:send', payload),
   stop: () => ipcRenderer.invoke('chat:stop'),
   compact: () => ipcRenderer.invoke('chat:compact'),
