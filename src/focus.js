@@ -68,6 +68,16 @@ function genId() {
   return 'f-' + Date.now().toString(36) + '-' + crypto.randomBytes(3).toString('hex');
 }
 
+// Like clip(), but keeps newlines/indentation intact (clip() collapses all
+// whitespace, which would mangle code/file contents the model still needs
+// to reason about). Only trims the middle of oversized tool output.
+function clipPreserveFormatting(s, n) {
+  if (s.length <= n) return s;
+  const head = Math.ceil(n * 0.7);
+  const tail = n - head;
+  return `${s.slice(0, head)}\n…[${s.length - n} chars truncated]…\n${s.slice(s.length - tail)}`;
+}
+
 class FocusSession {
   constructor({ id, manager, description, prompt, deadlineMs, agentRefs, modelOverride, role, mode }) {
     this.id = id;
@@ -98,6 +108,31 @@ class FocusSession {
     // into this.messages; consumed once per retry, ephemeral only.
     this._pendingContinuation = null;
     this._emptyRounds = 0;
+    // Deterministic (non-LLM) ledger of files actually written/edited on disk,
+    // parsed from real tool results — not from the model's own claims. This
+    // survives compact() untouched so a lossy summary (especially at small
+    // contextTokens, see needsCompaction) can never make the agent "forget"
+    // whether it actually created a file vs. only said it would.
+    this._filesTouched = new Map();
+  }
+
+  recordFileTouch(toolName, args, output) {
+    const text = String(output || '');
+    let file = null;
+    let action = null;
+    const wroteMatch = text.match(/^Wrote \d+ chars to (.+)$/);
+    const editedMatch = text.match(/^Edited (.+?)(?: \(|$)/);
+    if (wroteMatch) { file = wroteMatch[1]; action = 'written'; }
+    else if (editedMatch) { file = editedMatch[1]; action = 'edited'; }
+    if (file) this._filesTouched.set(file, action);
+  }
+
+  get filesTouchedSummary() {
+    if (this._filesTouched.size === 0) {
+      return '[Verified file ledger: no files have been written or edited yet in this session.]';
+    }
+    const lines = [...this._filesTouched.entries()].map(([f, a]) => `- ${f} (${a})`);
+    return `[Verified file ledger — these files actually exist on disk right now; nothing else does, regardless of what earlier turns claimed:\n${lines.join('\n')}]`;
   }
 
   // Accepts a plain string (legacy narrative note — "compacting context…",
@@ -209,7 +244,7 @@ class FocusSession {
     ], { maxTokens: maxSummaryTokens });
 
     this.messages = [
-      { role: 'user', content: `[Research session compacted. Summary of findings and progress so far:]\n\n${summary}` },
+      { role: 'user', content: `[Research session compacted. Summary of findings and progress so far:]\n\n${summary}\n\n${this.filesTouchedSummary}` },
       { role: 'assistant', content: 'Understood — continuing research.' },
       ...tail.filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.tool_calls && typeof m.content === 'string')),
     ];
@@ -339,11 +374,12 @@ class FocusSession {
         }
       }
 
+      const scratchpadWithLedger = [this.scratchpad, this.filesTouchedSummary].filter(Boolean).join('\n\n');
       const systemPrompt = buildSystemPrompt({
         cwd,
         subagent: true,
         focus: { id: this.id, description: this.description, minutes: this.remainingMin || 30, mode: this.mode },
-        scratchpad: this.scratchpad,
+        scratchpad: scratchpadWithLedger,
         contextTokens: turnProvider.contextTokens || cfg.contextTokens,
         databaseContext
       });
@@ -655,7 +691,13 @@ class FocusSession {
             output = `ERROR: ${err.message}`;
           }
         }
-        this.messages.push({ role: 'tool', tool_call_id: call.id, content: String(output) });
+        if (ok && (name === 'write' || name === 'edit')) this.recordFileTouch(name, args, output);
+        // Cap what goes into the model's own context — large outputs (pip
+        // install logs, big listings) are the main driver of hitting
+        // needsCompaction so often; the deterministic ledger above means we
+        // don't need the raw bytes kept around to remember what was written.
+        const storedOutput = clipPreserveFormatting(String(output), 3000);
+        this.messages.push({ role: 'tool', tool_call_id: call.id, content: storedOutput });
         this.addLog({ kind: 'tool', tool: name, args, ok, output: clip(String(output), 400) });
       }
 
