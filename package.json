@@ -1,6 +1,6 @@
 {
   "name": "voidcode",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "description": "VoidCode — a terminal and desktop AI agent harness with an optional SQL-backed execution context.",
   "main": "app/main.js",
   "bin": {
@@ -62,7 +62,8 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "VoidCode",
-      "artifactName": "VoidCode-Setup-${version}.exe"
+      "artifactName": "VoidCode-Setup-${version}.exe",
+      "differentialPackage": false
     }
   },
   "engines": {
