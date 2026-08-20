@@ -77,10 +77,11 @@ function main() {
     console.error(`\n✗ Expected build output not found: ${exePath}`);
     process.exit(1);
   }
-  if (!fs.existsSync(blockmapPath)) {
-    console.error(`\n✗ Expected blockmap not found: ${blockmapPath}`);
-    process.exit(1);
-  }
+  // Only generated when nsis.differentialPackage is enabled — this project
+  // disabled it (see commit "Disable differential updates to stop
+  // delta-patch corruption") so every update ships as a full file instead
+  // of a binary diff. No blockmap means nothing to upload or verify.
+  const hasBlockmap = fs.existsSync(blockmapPath);
 
   console.log('\n-- Computing latest.yml from the actual built file --');
   const stat = fs.statSync(exePath);
@@ -111,18 +112,20 @@ function main() {
   }
   // --clobber: safe to re-run this script after a partial failure without
   // manually figuring out what already made it up.
-  run('gh', ['release', 'upload', tag, exePath, blockmapPath, latestYmlPath, '--repo', 'seed0001/voidcoder', '--clobber']);
+  const uploadPaths = hasBlockmap ? [exePath, blockmapPath, latestYmlPath] : [exePath, latestYmlPath];
+  run('gh', ['release', 'upload', tag, ...uploadPaths, '--repo', 'seed0001/voidcoder', '--clobber']);
 
   console.log('\n-- Verifying the published latest.yml actually describes this version --');
   const published = runCapture('gh', ['release', 'view', tag, '--repo', 'seed0001/voidcoder', '--json', 'assets', '-q', '.assets[].name']);
   const assetNames = published.trim().split('\n');
-  for (const required of [exeName, `${exeName}.blockmap`, 'latest.yml']) {
+  const requiredAssets = hasBlockmap ? [exeName, `${exeName}.blockmap`, 'latest.yml'] : [exeName, 'latest.yml'];
+  for (const required of requiredAssets) {
     if (!assetNames.includes(required)) {
       console.error(`\n✗ ${required} is missing from the published release — something is still wrong.`);
       process.exit(1);
     }
   }
-  console.log(`\n✓ ${tag} published with all 3 assets verified present: ${exeName}, .blockmap, latest.yml`);
+  console.log(`\n✓ ${tag} published with all ${requiredAssets.length} assets verified present: ${requiredAssets.join(', ')}`);
   console.log(`  https://github.com/seed0001/voidcoder/releases/tag/${tag}\n`);
 }
 
