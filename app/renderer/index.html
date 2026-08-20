@@ -9,6 +9,7 @@
 <body>
 <div id="app" data-view="desktop">
   <div id="desktop-view">
+    <canvas id="wallpaper-canvas" class="hidden"></canvas>
     <div id="desktop-icons"></div>
     <button id="desktop-add-btn" title="Add a project folder">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -427,6 +428,7 @@
   </div>
 </div>
 
+<script type="module" src="wallpaper/wallpaper.js"></script>
 <script src="md.js"></script>
 <script src="diff.js"></script>
 <script src="voice.js"></script>

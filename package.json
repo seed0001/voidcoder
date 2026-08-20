@@ -72,7 +72,8 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^33.4.11",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "three": "^0.185.1"
   },
   "dependencies": {
     "@discordjs/voice": "^0.18.0",

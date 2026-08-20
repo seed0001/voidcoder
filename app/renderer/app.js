@@ -731,6 +731,7 @@ function applyTheme(name) {
     btn.classList.toggle('active', btn.dataset.theme === uiTheme);
     btn.setAttribute('aria-checked', btn.dataset.theme === uiTheme ? 'true' : 'false');
   });
+  window.Wallpaper?.retint();
 }
 
 function setPacer(thinking) {
@@ -748,6 +749,10 @@ function applyUi(st) {
   pacerOn = ui.pacer !== false;
   if ($('#st-pacer')) $('#st-pacer').checked = pacerOn;
   if (!generating) setPacer(false);
+  if (window.Wallpaper && window.Wallpaper.getPack() !== (ui.wallpaper || 'none')) {
+    window.Wallpaper.setPack(ui.wallpaper || 'none');
+    window.Wallpaper.setActive(currentView === 'desktop');
+  }
 }
 
 function openSettings() {
@@ -958,6 +963,7 @@ document.getElementById('updates-install-btn').addEventListener('click', () => {
 function showView(view) {
   currentView = view;
   $('#app').dataset.view = view;
+  window.Wallpaper?.setActive(view === 'desktop');
 }
 
 const FOLDER_ICON_SVG = '<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>';
@@ -1127,14 +1133,20 @@ function showDesktopContextMenu(clientX, clientY) {
   menu.className = 'desktop-ctx-menu';
   menu.style.left = clientX + 'px';
   menu.style.top = clientY + 'px';
+  const currentWallpaper = (snap?.settings?.ui?.wallpaper) || 'none';
+  const packs = window.Wallpaper ? window.Wallpaper.listPacks() : [{ id: 'none', name: 'None' }];
+  const wallpaperBtns = packs.map((p) => `<button data-wallpaper="${p.id}" class="${p.id === currentWallpaper ? 'active' : ''}">${escapeHtml(p.name)}</button>`).join('');
   menu.innerHTML = `
     <div class="dcm-label">Arrange icons by</div>
     <button data-by="name">Name</button>
     <button data-by="created">Date created</button>
+    <div class="dcm-sep"></div>
+    <div class="dcm-label">Desktop background</div>
+    ${wallpaperBtns}
   `;
   document.body.appendChild(menu);
 
-  menu.querySelectorAll('button').forEach((btn) => {
+  menu.querySelectorAll('[data-by]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const by = btn.dataset.by;
       closeDesktopMenu();
@@ -1144,6 +1156,16 @@ function showDesktopContextMenu(clientX, clientY) {
       snap = await window.vc.arrangeProjects(by, desktopGridCols());
       snap = await window.vc.arrangeContainers(by, desktopGridCols());
       renderDesktop();
+    });
+  });
+
+  menu.querySelectorAll('[data-wallpaper]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.wallpaper;
+      closeDesktopMenu();
+      window.Wallpaper?.setPack(id);
+      window.Wallpaper?.setActive(currentView === 'desktop');
+      snap = await window.vc.saveSettings({ ui: { wallpaper: id } });
     });
   });
 

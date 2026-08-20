@@ -217,6 +217,7 @@ function snapshot(provider) {
       ui: {
         theme: (cfg.ui && cfg.ui.theme) || 'void',
         pacer: cfg.ui ? cfg.ui.pacer !== false : true,
+        wallpaper: (cfg.ui && cfg.ui.wallpaper) || 'none',
       },
       webPortal: {
         enabled: !!(cfg.webPortal && cfg.webPortal.enabled),
