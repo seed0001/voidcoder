@@ -706,7 +706,7 @@ async function submitBugReportForm() {
       });
     } else if (res.manualUrl) {
       $('#bugreport-saved').textContent = '';
-      showBugReportResult(false, `No GitHub token configured — <a href="#" id="br-manual-link">click to file it manually</a> in your browser.`);
+      showBugReportResult(false, `Couldn't reach the report server — <a href="#" id="br-manual-link">click to file it manually</a> in your browser.`);
       $('#br-manual-link').addEventListener('click', (e) => {
         e.preventDefault();
         window.vc.openBugReportUrl(res.manualUrl);

@@ -1,9 +1,9 @@
-// Bug reports: files a GitHub issue in the app's own repo so problems users
-// hit (or that the agent notices mid-conversation) land somewhere trackable.
-// Reuses the GitHub token already wired up for other integrations
-// (src/config.js integrations.githubToken); falls back to a pre-filled
-// "new issue" URL when no token is configured, so reporting still works —
-// just as a link to open instead of an automatic submit.
+// Bug reports: posts to the VoidCoder website's /api/bug-report endpoint,
+// which holds the one shared GitHub token as a server-side secret and files
+// the issue on the user's behalf — no per-user GitHub token required.
+// Falls back to a pre-filled "new issue" URL if the website is unreachable,
+// so reporting still works — just as a link to open instead of an automatic
+// submit.
 
 const os = require('os');
 const { version: APP_VERSION } = require('../package.json');
@@ -11,10 +11,7 @@ const { version: APP_VERSION } = require('../package.json');
 const REPO_OWNER = 'seed0001';
 const REPO_NAME = 'voidcoder';
 const CATEGORIES = ['bug', 'feature-request', 'question'];
-
-function githubToken(cfg) {
-  return (cfg && cfg.integrations && cfg.integrations.githubToken) || process.env.GITHUB_TOKEN || '';
-}
+const REPORT_ENDPOINT = process.env.VOIDCODE_BUGREPORT_ENDPOINT || 'https://voidcoder-website-production.up.railway.app/api/bug-report';
 
 function manualIssueUrl({ title, body, category }) {
   const labels = ['bug-report', ...(CATEGORIES.includes(category) ? [category] : [])];
@@ -43,41 +40,33 @@ async function submitBugReport(cfg, { title, description, category = 'bug', cont
   const finalCategory = CATEGORIES.includes(category) ? category : 'bug';
   const finalTitle = (title && title.trim()) || description.trim().split('\n')[0].slice(0, 72);
   const body = formatBody({ description, context });
-  const token = githubToken(cfg);
-
-  if (!token) {
-    return {
-      ok: false,
-      error: 'No GitHub token configured',
-      manualUrl: manualIssueUrl({ title: finalTitle, body, category: finalCategory }),
-    };
-  }
-
-  const labels = ['bug-report', finalCategory];
-  if (submittedBy === 'agent') labels.push('filed-by-agent');
 
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/issues`, {
+    const res = await fetch(REPORT_ENDPOINT, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'VoidCode-BugReport',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title: finalTitle, body, labels }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: finalTitle,
+        description,
+        category: finalCategory,
+        submittedBy,
+        version: APP_VERSION,
+        platform: `${os.platform()} ${os.release()}`,
+        provider: context.provider || null,
+        model: context.model || null,
+        recentError: context.recentError ? String(context.recentError) : null,
+      }),
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => '');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.ok) {
       return {
         ok: false,
-        error: `GitHub API ${res.status}: ${errText.slice(0, 300)}`,
+        error: data.error || `report server responded ${res.status}`,
         manualUrl: manualIssueUrl({ title: finalTitle, body, category: finalCategory }),
       };
     }
-    const data = await res.json();
-    return { ok: true, url: data.html_url, number: data.number };
+    return { ok: true, url: data.url, number: data.number };
   } catch (err) {
     return {
       ok: false,

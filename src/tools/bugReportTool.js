@@ -28,7 +28,7 @@ function makeExecutors(ctx) {
       const context = { provider: ctx.provider?.name, model: ctx.provider?.model };
       const res = await submitBugReport(cfg, { title, description, category, context, submittedBy: 'agent' });
       if (res.ok) return `Filed as issue #${res.number}: ${res.url}`;
-      if (res.manualUrl) return `Could not file it automatically (${res.error}) — no GitHub token is configured in Settings. Manual link to file it yourself: ${res.manualUrl}`;
+      if (res.manualUrl) return `Could not file it automatically (${res.error}). Manual link to file it yourself: ${res.manualUrl}`;
       return `Failed to file bug report: ${res.error}`;
     },
   };
