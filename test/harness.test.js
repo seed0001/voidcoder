@@ -436,6 +436,62 @@ async function main() {
     assert(agentForCompaction.needsCompaction(3060));
   });
 
+  // ---------------- unit: compact() never produces two consecutive user turns,
+  // and never silently drops a tool_calls/tool-result pair ----------------
+  // Regression for a real bug: pinning the session-opening user message as its
+  // own leading turn, directly before the compacted-summary user message, put
+  // two user-role messages back to back with no assistant reply between them.
+  // A local model (via Ollama) reading that shape treated the original opening
+  // question as a brand-new, unanswered prompt and answered it from scratch —
+  // reading as "the agent reverted to the very beginning" after compaction.
+  await checkAsync('compact() never emits two consecutive user messages and preserves the opening task', async () => {
+    const summaryServer = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (d) => (body += d));
+      req.on('end', () => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { content: 'Summary: wrote foo.js and bar.js so far.' } }] }));
+      });
+    });
+    await new Promise((r) => summaryServer.listen(0, '127.0.0.1', r));
+    const port = summaryServer.address().port;
+
+    const agent = new Agent({
+      cfg: { provider: 'mock', model: 'mock', agentMode: 'legacy', compactAt: 0.75, contextTokens: 128000 },
+      provider: { name: 'mock', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', model: 'mock', contextTokens: 128000 },
+      session: {
+        messages: [
+          { role: 'user', content: 'Build me an AR game called Echoes of the Past.' },
+          { role: 'assistant', content: 'Sure — starting with the location manager.' },
+          { role: 'user', content: 'sounds good' },
+          { role: 'assistant', content: null, tool_calls: [{ id: '1', function: { name: 'write', arguments: '{}' } }] },
+          { role: 'tool', tool_call_id: '1', content: 'Wrote 40 lines to LocationManager.cs' },
+          { role: 'assistant', content: 'Wrote LocationManager.cs, moving to the next file.' },
+        ],
+        save() {},
+      },
+      permissions: { check: () => true },
+      events: {},
+    });
+
+    const changed = await agent.compact();
+    assert(changed, 'compact() should have run');
+    summaryServer.close();
+
+    const msgs = agent.session.messages;
+    for (let i = 1; i < msgs.length; i++) {
+      assert(!(msgs[i - 1].role === 'user' && msgs[i].role === 'user'), `two consecutive user messages at index ${i - 1}/${i}: ${JSON.stringify(msgs.map(m => m.role))}`);
+    }
+    assert(msgs[0].role === 'user' && msgs[0].content.includes('Build me an AR game called Echoes of the Past.'), 'original task must survive, folded into the first message');
+    assert(msgs[0].content.includes('Summary: wrote foo.js and bar.js'), 'compacted summary must be present');
+
+    // The tool_calls/tool-result pair must not be split: it either both
+    // survive verbatim in the tail, or neither does (fully summarized).
+    const hasToolCall = msgs.some((m) => m.tool_calls);
+    const hasToolResult = msgs.some((m) => m.role === 'tool');
+    assert.strictEqual(hasToolCall, hasToolResult, `tool_calls/tool-result pair got split: ${JSON.stringify(msgs)}`);
+  });
+
   // ---------------- unit: two-sided prompt blocks ----------------
   const { buildSystemPrompt } = require('../src/prompt');
   check('buildSystemPrompt chat side strips tools and adds delegation', () => {

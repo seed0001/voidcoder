@@ -266,9 +266,26 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
   async compact() {
     const msgs = this.session.messages;
     if (msgs.length < 6) return false;
-    const keepTail = 4;
-    const toSummarize = msgs.slice(0, msgs.length - keepTail);
-    const tail = msgs.slice(-keepTail);
+
+    // Keep a verbatim tail of the trailing plain-text user/assistant turns.
+    // Walking backward and stopping at the first tool-call/tool-result
+    // message (instead of slicing a fixed count and filtering afterward)
+    // means a tool_calls/tool-result pair is never split — either the whole
+    // pair lands in the verbatim tail, or it doesn't and stays fully
+    // captured in the summarized transcript below. The old slice-then-filter
+    // approach could drop a tool call and its result outright when they
+    // landed in the last 4 raw messages, silently losing the most recent
+    // real work (e.g. a file just written) right when compaction fired.
+    const MIN_TAIL = 4;
+    let tailStart = msgs.length;
+    while (tailStart > 0 && msgs.length - tailStart < MIN_TAIL) {
+      const m = msgs[tailStart - 1];
+      const isPlainText = (m.role === 'user' || m.role === 'assistant') && !m.tool_calls && typeof m.content === 'string';
+      if (!isPlainText) break;
+      tailStart--;
+    }
+    const toSummarize = msgs.slice(0, tailStart);
+    const tail = msgs.slice(tailStart);
     this.events.onStatus?.('compacting context…');
     const transcript = toSummarize.map((m) => {
       const role = m.role;
@@ -287,16 +304,27 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       { role: 'user', content: transcript.slice(0, 300000) },
     ], { maxTokens: maxSummaryTokens });
 
-    // Pin the session-opening user message verbatim. Small/weak summary models
-    // routinely drop the task itself, which then reads as total amnesia.
+    // Preserve the session-opening user message verbatim, INSIDE the same
+    // compacted-summary message rather than as its own leading turn.
+    // Small/weak summary models routinely drop the task itself, which then
+    // reads as total amnesia — hence keeping it verbatim at all. But a
+    // separate pinned user message immediately followed by this user
+    // message put two user turns back to back with no assistant reply in
+    // between: a malformed shape for strict-alternation chat templates
+    // (hits hardest on local models via Ollama/llama.cpp), and in practice
+    // the model would read the original opening question as a brand-new,
+    // currently-unanswered prompt and answer it from scratch instead of
+    // continuing — the exact "reverted to the very beginning" failure this
+    // caused.
     const firstUser = msgs.find((m) => m.role === 'user' && typeof m.content === 'string');
-    const pinned = firstUser && !tail.some((m) => m === firstUser) ? [firstUser] : [];
+    const pinnedTask = firstUser && !tail.includes(firstUser)
+      ? `Original task (verbatim):\n${firstUser.content}\n\n`
+      : '';
 
     this.session.messages = [
-      ...pinned,
-      { role: 'user', content: `[Conversation compacted. Summary of everything so far:]\n\n${summary}` },
+      { role: 'user', content: `${pinnedTask}[Conversation compacted. Summary of everything so far:]\n\n${summary}` },
       { role: 'assistant', content: 'Understood — continuing from that state.' },
-      ...tail.filter((m) => m.role === 'user' || (m.role === 'assistant' && !m.tool_calls && typeof m.content === 'string')),
+      ...tail,
     ];
     this.session.save();
     return true;
