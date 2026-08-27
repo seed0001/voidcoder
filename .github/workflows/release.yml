@@ -1,0 +1,44 @@
+name: Release
+
+# Builds the Windows installer natively on a Windows runner (no Wine/cross-
+# compilation needed) and publishes it to GitHub Releases via
+# scripts/publish-release.js — the same script used for a manual local
+# release, so there is exactly one release code path whether it runs here
+# or on a developer's machine.
+#
+# Triggers on any vX.Y.Z tag push. workflow_dispatch is also enabled so a
+# failed/partial release can be safely re-run (scripts/publish-release.js
+# uses --clobber and is idempotent) without needing a new tag.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build and publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/publish-release.js
