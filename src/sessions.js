@@ -37,6 +37,13 @@ class Session {
     this.title = '';
     this.messages = [];
     this.scratchpad = '';
+    // Durable plan state — deliberately kept OUTSIDE session.messages so
+    // context retirement (src/contextRetirement.js) never touches it: the
+    // roadmap is the source of truth for "where am I" after older history is
+    // retired, and the original task is always visible regardless of how
+    // much conversation has since been folded away.
+    this.todos = [];
+    this.originalTask = '';
     this.fileBackups = []; // [{file, before, after, ts}] for /undo (before=null means file was created)
     this.usage = { input: 0, output: 0, turns: 0, cost: 0, activeTimeMs: 0 };
     this.contextTraces = [];
@@ -59,6 +66,8 @@ class Session {
       title: data.title || '',
       messages: sanitizedMessages,
       scratchpad: data.scratchpad || '',
+      todos: Array.isArray(data.todos) ? data.todos : [],
+      originalTask: data.originalTask || '',
       fileBackups: data.fileBackups || [],
       usage: mergeUsage(data.usage),
       contextTraces: Array.isArray(data.contextTraces) ? data.contextTraces : [],
@@ -108,6 +117,8 @@ class Session {
       contextTraces: this.contextTraces.slice(-100),
       messages: this.messages,
       scratchpad: this.scratchpad,
+      todos: this.todos,
+      originalTask: this.originalTask,
       fileBackups: this.fileBackups.slice(-50), // cap undo history
     };
     fs.writeFileSync(this.file, JSON.stringify(data), 'utf8');

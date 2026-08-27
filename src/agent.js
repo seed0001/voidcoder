@@ -13,6 +13,8 @@ const { discoverModels } = require('./modelCatalog');
 const { createContextService } = require('./contextDb');
 const { makeOrganism } = require('./organism');
 const { buildContinuationPacket, describePlanStep, describeRemainingSteps, clip } = require('./continuationPacket');
+const contextRetirement = require('./contextRetirement');
+const { appendMemory } = require('./tools/memoryTool');
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
@@ -102,7 +104,13 @@ class Agent {
         this.session.recordFileChange(file, before, after);
         this.events.onFileChange?.(file, before, after);
       },
-      onTodos: (todos) => this.events.onTodos?.(todos),
+      onTodos: (todos) => {
+        // Mirror into the persisted session so the roadmap survives a
+        // process restart / -c resume, not just this in-memory run.
+        if (this.session) this.session.todos = todos;
+        this.events.onTodos?.(todos);
+      },
+      todos: Array.isArray(this.session?.todos) ? this.session.todos : [],
       runSubagent: (args) => this.runSubagent(args),
       focus: this.focus,
       roles: this.roles,
@@ -113,6 +121,9 @@ class Agent {
       agentKind: 'main',
     };
     this.focus.setToolCtx(this.toolCtx);
+    // Surface a resumed roadmap to the UI immediately, not only after the
+    // next todowrite call.
+    if (this.toolCtx.todos.length) { try { this.events.onTodos?.(this.toolCtx.todos); } catch {} }
     if (this.mode === 'split') {
       // Chat side: no tool definitions, no executors. Work is delegated.
       this.tools = { apiDefs: [], executors: {} };
@@ -263,71 +274,78 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
     return historyTokens + systemPromptTokens > limit * this.cfg.compactAt;
   }
 
+  // Retires the OLDEST safe chunk of history (never the most recent
+  // exchanges — see contextRetirement.PROTECT_UNITS) instead of flattening
+  // the entire conversation into one lossy summary. What's worth keeping
+  // from that chunk is extracted in structured form:
+  //   - roadmap progress/new steps  -> merged into the durable todo/roadmap
+  //     list (session.todos), which is re-injected into every system prompt
+  //     regardless of what happens to the messages themselves.
+  //   - durable facts (decisions, file states, constraints) -> appended to
+  //     project memory (.voidcode-memory.md), which persists across the
+  //     whole project, not just this session.
+  //   - everything else collapses to a short pointer line, not a paragraph
+  //     the model has to re-parse and hope is complete.
+  // Called repeatedly (once per retirable chunk) until back under budget —
+  // see the callers in send() and _loop() — so a single huge history is
+  // worked down incrementally rather than requiring one giant summarization
+  // call, and the model never loses the tail it's actively working from.
   async compact() {
     const msgs = this.session.messages;
-    if (msgs.length < 6) return false;
+    const plan = contextRetirement.planRetirement(msgs);
+    if (!plan) return false;
 
-    // Keep a verbatim tail of the trailing plain-text user/assistant turns.
-    // Walking backward and stopping at the first tool-call/tool-result
-    // message (instead of slicing a fixed count and filtering afterward)
-    // means a tool_calls/tool-result pair is never split — either the whole
-    // pair lands in the verbatim tail, or it doesn't and stays fully
-    // captured in the summarized transcript below. The old slice-then-filter
-    // approach could drop a tool call and its result outright when they
-    // landed in the last 4 raw messages, silently losing the most recent
-    // real work (e.g. a file just written) right when compaction fired.
-    const MIN_TAIL = 4;
-    let tailStart = msgs.length;
-    while (tailStart > 0 && msgs.length - tailStart < MIN_TAIL) {
-      const m = msgs[tailStart - 1];
-      const isPlainText = (m.role === 'user' || m.role === 'assistant') && !m.tool_calls && typeof m.content === 'string';
-      if (!isPlainText) break;
-      tailStart--;
-    }
-    const toSummarize = msgs.slice(0, tailStart);
-    const tail = msgs.slice(tailStart);
-    this.events.onStatus?.('compacting context…');
-    const transcript = toSummarize.map((m) => {
-      const role = m.role;
-      const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
-      const tools = m.tool_calls ? ` [called: ${m.tool_calls.map((t) => t.function.name).join(', ')}]` : '';
-      return `${role}${tools}: ${String(content).slice(0, 2000)}`;
-    }).join('\n');
+    this.events.onStatus?.('retiring older context…');
+    const chunkTranscript = contextRetirement.transcriptFor(msgs, plan);
+    const { system, user } = contextRetirement.buildRetirementPrompt({
+      todos: this.toolCtx.todos || [],
+      chunkTranscript,
+    });
 
     const limit = this.chatLimit;
-    const isSmallCtx = limit <= 8192;
-    const maxSummaryWords = isSmallCtx ? 250 : 1500;
-    const maxSummaryTokens = isSmallCtx ? 400 : 3000;
+    const maxReplyTokens = limit <= 8192 ? 500 : 900;
+    const reply = await complete(this.smallProvider(), [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ], { maxTokens: maxReplyTokens });
 
-    const summary = await complete(this.smallProvider(), [
-      { role: 'system', content: `Summarize this coding-agent conversation for context continuation. Preserve: the original task and constraints, all file paths touched and what changed in them, key decisions, current state, and what remains to be done. Be dense and factual. Under ${maxSummaryWords} words.` },
-      { role: 'user', content: transcript.slice(0, 300000) },
-    ], { maxTokens: maxSummaryTokens });
+    const parsed = contextRetirement.parseRetirementReply(reply);
 
-    // Preserve the session-opening user message verbatim, INSIDE the same
-    // compacted-summary message rather than as its own leading turn.
-    // Small/weak summary models routinely drop the task itself, which then
-    // reads as total amnesia — hence keeping it verbatim at all. But a
-    // separate pinned user message immediately followed by this user
-    // message put two user turns back to back with no assistant reply in
-    // between: a malformed shape for strict-alternation chat templates
-    // (hits hardest on local models via Ollama/llama.cpp), and in practice
-    // the model would read the original opening question as a brand-new,
-    // currently-unanswered prompt and answer it from scratch instead of
-    // continuing — the exact "reverted to the very beginning" failure this
-    // caused.
-    const firstUser = msgs.find((m) => m.role === 'user' && typeof m.content === 'string');
-    const pinnedTask = firstUser && !tail.includes(firstUser)
-      ? `Original task (verbatim):\n${firstUser.content}\n\n`
-      : '';
+    const mergedTodos = contextRetirement.mergeRoadmap(this.toolCtx.todos || [], parsed);
+    this.toolCtx.todos = mergedTodos;
+    this.toolCtx.onTodos?.(mergedTodos);
 
+    if (parsed.memoryFacts.length) {
+      try {
+        appendMemory(this.toolCtx.cwd, `## Retired from session ${this.session.id || ''} (${new Date().toISOString()})\n${parsed.memoryFacts.map((f) => `- ${f}`).join('\n')}`);
+      } catch { /* best-effort — never let a memory-write failure block retirement */ }
+    }
+
+    const pointerText = parsed.pointer || '(no summary extracted for this chunk)';
     this.session.messages = [
-      { role: 'user', content: `${pinnedTask}[Conversation compacted. Summary of everything so far:]\n\n${summary}` },
-      { role: 'assistant', content: 'Understood — continuing from that state.' },
-      ...tail,
+      ...msgs.slice(0, plan.start),
+      { role: 'user', content: `[Older context retired — folded into the Roadmap and Project Memory above. Pointer: ${pointerText}]` },
+      { role: 'assistant', content: 'Understood — continuing from the roadmap.' },
+      ...msgs.slice(plan.end),
     ];
     this.session.save();
     return true;
+  }
+
+  // Retire chunks until under `fraction` of the limit, or until compact()
+  // reports nothing more can be safely retired. Bounded so a pathological
+  // history (or a retirement pass that isn't shrinking things) can't loop
+  // forever — each pass only ever touches the oldest safe chunk, so this
+  // naturally stops well short of the protected recent tail either way.
+  async compactUntilUnder(extraTokens, fraction, maxPasses = 6) {
+    for (let pass = 0; pass < maxPasses; pass++) {
+      const tokens = estTokens(this.session.messages) + extraTokens;
+      if (tokens <= this.chatLimit * fraction) return true;
+      let changed = false;
+      try { changed = await this.compact(); } catch { return false; }
+      if (!changed) return false;
+    }
+    return estTokens(this.session.messages) + extraTokens <= this.chatLimit * fraction;
   }
 
   // ---- subagents ----------------------------------------------------------
@@ -402,7 +420,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       mcpServers: this.mcpServers, includeTask: true, includeFocus: false,
     });
     const databaseContext = await this.resolveContext(task, 'worker');
-    const systemPrompt = buildSystemPrompt({ cwd: this.toolCtx.cwd, worker: true, contextTokens: workerLimit, databaseContext });
+    const systemPrompt = buildSystemPrompt({ cwd: this.toolCtx.cwd, worker: true, contextTokens: workerLimit, databaseContext, originalTask: this.session.originalTask, roadmap: this.toolCtx.todos });
     this.events.onSubagentStart?.('work: ' + String(task).slice(0, 80));
     const workText = `# Work request from the chat agent\n\n${task}${context ? `\n\n# Context passed by the chat agent\n${context}` : ''}`;
     const messages = [{
@@ -469,6 +487,11 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
     if (!this.session.title) {
       this.session.title = input.text.replace(/\s+/g, ' ').slice(0, 60) || 'Image analysis';
     }
+    // Pinned once, outside session.messages, so it survives every future
+    // context retirement regardless of how much conversation gets folded away.
+    if (!this.session.originalTask && input.text) {
+      this.session.originalTask = clip(input.text, 4000);
+    }
 
     // Update scratchpad every 3 turns (or if empty and we have history)
     if (this.session.messages.length >= 2 && (this.session.usage.turns % 3 === 0 || !this.session.scratchpad)) {
@@ -485,6 +508,8 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       cwd: this.toolCtx.cwd,
       autonomous,
       scratchpad: this.session.scratchpad,
+      originalTask: this.session.originalTask,
+      roadmap: this.toolCtx.todos,
       contextTokens: this.chatLimit,
       side: split ? 'chat' : null,
       databaseContext,
@@ -493,7 +518,7 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
     const toolTokens = estTokens(this.tools.apiDefs);
 
     if (this.needsCompaction(sysPromptTokens + toolTokens)) {
-      try { await this.compact(); } catch { /* compaction is best-effort */ }
+      try { await this.compactUntilUnder(sysPromptTokens + toolTokens, this.cfg.compactAt); } catch { /* compaction is best-effort */ }
     }
     const result = await this._loop(this.session.messages, this.tools, {
       systemPrompt,
@@ -596,9 +621,8 @@ const { resolveProvider, saveGlobal, ModelRegistry } = require('./config');
       const sysToolToks = estTokens([{ role: 'system', content: systemPrompt }]) + estTokens(useTools ? useTools.apiDefs : []);
       if (sysToolToks + estTokens(messages) > limit * 0.9) {
         if (messages === this.session.messages) {
-          let compacted = false;
-          try { compacted = await this.compact(sysToolToks); } catch { /* best-effort */ }
-          if (compacted) messages = this.session.messages;
+          try { await this.compactUntilUnder(sysToolToks, 0.9); } catch { /* best-effort */ }
+          messages = this.session.messages;
         } else if (messages.length > 10) {
           messages = [messages[0], ...messages.slice(-8)];
         }

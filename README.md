@@ -53,9 +53,14 @@ runs `npm install`, launches); `launch.bat` just runs the desktop app.
   list with `/sessions`, resume with `/resume` or `-c`. `/undo` reverts the
   last file change (full before-snapshots kept per session, capped at 50).
   `/diff` shows every change this session.
-- **Context management** — automatic compaction when the estimated window
-  passes 75% (older history is summarized by the model — optionally a cheaper
-  `smallModel`), plus manual `/compact`.
+- **Context management** — a durable roadmap (`todowrite`, grouped into
+  phases) and the original task are pinned outside the conversation history
+  and re-injected into every system prompt, so they survive regardless of
+  what happens to older messages. When the estimated window passes 75% (or
+  90% mid-turn), the OLDEST chunk of history is retired incrementally —
+  never the recent exchanges — with roadmap progress and durable facts
+  extracted into the roadmap/`project_memory` before the chunk is replaced
+  by a short pointer, plus manual `/compact`.
 - **Permissions** — per-category modes (`allow`/`ask`/`deny`) for
   bash / write / edit / webfetch / mcp; `bashAllow` patterns (e.g. `"git *"`)
   skip prompts. Interactive prompts offer once / always-this-session / deny.

@@ -7,6 +7,7 @@ const { execFileSync } = require('child_process');
 const { loadProjectInstructions } = require('./config');
 const { readMemory } = require('./tools/memoryTool');
 const { buildRulesSection } = require('./rules');
+const { renderRoadmap } = require('./contextRetirement');
 
 function gitInfo(cwd) {
   const run = (args) => {
@@ -31,7 +32,7 @@ function topLevelListing(cwd) {
   } catch { return '(unreadable)'; }
 }
 
-function buildSystemPrompt({ cwd, autonomous = false, subagent = false, focus = null, scratchpad = '', contextTokens = null, side = null, worker = false, databaseContext = null }) {
+function buildSystemPrompt({ cwd, autonomous = false, subagent = false, focus = null, scratchpad = '', originalTask = '', roadmap = null, contextTokens = null, side = null, worker = false, databaseContext = null }) {
   const instructions = loadProjectInstructions(cwd);
   const now = new Date();
   const config = require('./config');
@@ -47,6 +48,14 @@ function buildSystemPrompt({ cwd, autonomous = false, subagent = false, focus = 
   const activePersonaPrompt = (cfg.personas && cfg.activePersona && cfg.personas[cfg.activePersona]) || cfg.persona || '';
   if (activePersonaPrompt) {
     prompt += `\n\n# Custom Persona / Instructions\n${activePersonaPrompt}`;
+  }
+
+  if (originalTask && originalTask.trim()) {
+    prompt += `\n\n# Original Task (persists across context compaction — this is what you were actually asked to do)\n${originalTask}`;
+  }
+
+  if (roadmap && roadmap.length) {
+    prompt += `\n\n# Roadmap (persists across context compaction — this is your source of truth for progress)\nIf older conversation was just retired/compacted, re-orient from THIS roadmap, not by re-deriving the plan from scratch. Keep it updated with todowrite as you work; group multi-step work under a phase.\n${renderRoadmap(roadmap)}`;
   }
 
   if (scratchpad && scratchpad.trim()) {
@@ -121,7 +130,7 @@ Records persist across sessions — they survive compaction and conversation res
 - Be direct and concise. Terminal output, not prose. No preamble, no summaries of what you are about to do.
 - Read before you edit. Never guess file contents. Use glob/grep to locate code, read to inspect it.
 - Prefer edit (exact string replace) over write for existing files. Preserve the file's existing style, indentation, and conventions.
-- Use todowrite to plan any task with 3+ steps; keep exactly one item in_progress; complete items as you go.
+- Use todowrite to plan any task with 3+ steps; keep exactly one item in_progress; complete items as you go. It is your durable roadmap (see the Roadmap section above) — if you ever see a "context retired/compacted" notice, re-orient from the Roadmap section instead of re-deriving the plan from memory.
 - For self-contained subtasks (broad searches, research, isolated changes) spawn a task subagent to keep your context lean.
 - Run things to verify: build, test, execute. If a command fails, read the error and fix the cause â€” do not blindly retry.
 - When you finish, state what changed in one or two sentences. If tests fail or something is broken, say so plainly.
@@ -142,7 +151,7 @@ Records persist across sessions — they survive compaction and conversation res
 - Listen more than you act. The tools are available when you need them, but they are not the default. Reaching for a tool before understanding the goal is a mistake.
 - Read before you edit. Never guess file contents. Use glob/grep to locate code, read to inspect it.
 - Prefer edit (exact string replace) over write for existing files. Preserve the file's existing style, indentation, and conventions.
-- Use todowrite to plan any multi-step task; keep exactly one item in_progress; complete items as you go.
+- Use todowrite to plan any multi-step task; keep exactly one item in_progress; complete items as you go. It is your durable roadmap (see the Roadmap section above) — if you ever see a "context retired/compacted" notice, re-orient from the Roadmap section instead of re-deriving the plan from memory.
 - For self-contained subtasks (broad searches, research, isolated changes) you can spawn a task subagent to work in the background while you continue the conversation.
 - Run things to verify: build, test, execute. If a command fails, read the error and fix the cause â€” do not blindly retry.
 - Never invent file paths, APIs, or command output. If unsure, look.

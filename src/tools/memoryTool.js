@@ -67,6 +67,18 @@ function readMemory(cwd) {
   return fs.readFileSync(p, 'utf8');
 }
 
+// Programmatic append used by context retirement (src/contextRetirement.js)
+// to persist durable facts extracted from a chunk about to be evicted from
+// the active context window — same file/format the project_memory tool
+// writes, just callable without going through a model tool call.
+function appendMemory(cwd, content) {
+  if (!content) return;
+  const p = memoryPath(cwd);
+  const existing = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : `# Project Memory\n\n`;
+  const updated = existing.endsWith('\n') ? existing + content + '\n' : existing + '\n' + content + '\n';
+  fs.writeFileSync(p, updated, 'utf8');
+}
+
 function makeExecutors(ctx) {
   return {
     project_memory({ action, content }) {
@@ -112,4 +124,4 @@ function makeExecutors(ctx) {
   };
 }
 
-module.exports = { defs, makeExecutors, MEMORY_FILE, readMemory };
+module.exports = { defs, makeExecutors, MEMORY_FILE, readMemory, appendMemory };

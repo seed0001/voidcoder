@@ -436,29 +436,34 @@ async function main() {
     assert(agentForCompaction.needsCompaction(3060));
   });
 
-  // ---------------- unit: compact() never produces two consecutive user turns,
-  // and never silently drops a tool_calls/tool-result pair ----------------
-  // Regression for a real bug: pinning the session-opening user message as its
-  // own leading turn, directly before the compacted-summary user message, put
-  // two user-role messages back to back with no assistant reply between them.
-  // A local model (via Ollama) reading that shape treated the original opening
-  // question as a brand-new, unanswered prompt and answered it from scratch —
-  // reading as "the agent reverted to the very beginning" after compaction.
-  await checkAsync('compact() never emits two consecutive user messages and preserves the opening task', async () => {
+  // ---------------- unit: compact() retires the oldest chunk only, never
+  // produces two consecutive user turns, and never splits a tool_calls/
+  // tool-result pair ----------------
+  // Regression for the "mid-turn compaction destroys the plan just built"
+  // bug: the old tail-selection walked backward over PLAIN TEXT messages
+  // only, so it came up EMPTY the instant the last message was a tool
+  // result (the normal case mid-turn) — the whole conversation, including
+  // whatever the agent just did, went through one lossy summary. compact()
+  // now retires only the oldest safe chunk (protecting the most recent
+  // units, atomically, regardless of their shape) and folds what's durable
+  // out of that chunk into the roadmap / project memory instead of prose.
+  await checkAsync('compact() retires only the oldest chunk, keeps the protected tail verbatim, and never emits two consecutive user messages', async () => {
     const summaryServer = http.createServer((req, res) => {
       let body = '';
       req.on('data', (d) => (body += d));
       req.on('end', () => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ choices: [{ message: { content: 'Summary: wrote foo.js and bar.js so far.' } }] }));
+        res.end(JSON.stringify({ choices: [{ message: { content: 'ROADMAP:\ncomplete: none\nin_progress: none\nnew: Setup :: Build the AR game\n\nMEMORY:\n- Game is called Echoes of the Past\n\nPOINTER: Discussed building an AR game and started on the location manager.' } }] }));
       });
     });
     await new Promise((r) => summaryServer.listen(0, '127.0.0.1', r));
     const port = summaryServer.address().port;
 
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'voidcode-compact-'));
     const agent = new Agent({
       cfg: { provider: 'mock', model: 'mock', agentMode: 'legacy', compactAt: 0.75, contextTokens: 128000 },
       provider: { name: 'mock', baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: '', model: 'mock', contextTokens: 128000 },
+      cwd: tmpDir,
       session: {
         messages: [
           { role: 'user', content: 'Build me an AR game called Echoes of the Past.' },
@@ -468,6 +473,7 @@ async function main() {
           { role: 'tool', tool_call_id: '1', content: 'Wrote 40 lines to LocationManager.cs' },
           { role: 'assistant', content: 'Wrote LocationManager.cs, moving to the next file.' },
         ],
+        todos: [],
         save() {},
       },
       permissions: { check: () => true },
@@ -482,14 +488,23 @@ async function main() {
     for (let i = 1; i < msgs.length; i++) {
       assert(!(msgs[i - 1].role === 'user' && msgs[i].role === 'user'), `two consecutive user messages at index ${i - 1}/${i}: ${JSON.stringify(msgs.map(m => m.role))}`);
     }
-    assert(msgs[0].role === 'user' && msgs[0].content.includes('Build me an AR game called Echoes of the Past.'), 'original task must survive, folded into the first message');
-    assert(msgs[0].content.includes('Summary: wrote foo.js and bar.js'), 'compacted summary must be present');
+    assert(msgs.some((m) => typeof m.content === 'string' && m.content.includes('[Older context retired')), 'a retirement pointer message must be present');
 
-    // The tool_calls/tool-result pair must not be split: it either both
-    // survive verbatim in the tail, or neither does (fully summarized).
+    // The tool_calls/tool-result pair is inside the protected recent tail
+    // (only 5 atomic units total here, well under PROTECT_UNITS+CHUNK_UNITS)
+    // so it must survive verbatim, never split.
     const hasToolCall = msgs.some((m) => m.tool_calls);
     const hasToolResult = msgs.some((m) => m.role === 'tool');
-    assert.strictEqual(hasToolCall, hasToolResult, `tool_calls/tool-result pair got split: ${JSON.stringify(msgs)}`);
+    assert(hasToolCall && hasToolResult, `tool_calls/tool-result pair should have survived in the protected tail: ${JSON.stringify(msgs)}`);
+    assert(msgs.some((m) => m.content === 'Wrote LocationManager.cs, moving to the next file.'), 'most recent message must survive verbatim');
+
+    // Roadmap update and memory fact from the retired chunk must have landed.
+    assert(agent.toolCtx.todos.some((t) => t.content.includes('Build the AR game')), 'roadmap update from the retired chunk must be merged in');
+    const memPath = path.join(tmpDir, '.voidcode-memory.md');
+    assert(fs.existsSync(memPath), 'project memory file should have been written');
+    assert(fs.readFileSync(memPath, 'utf8').includes('Echoes of the Past'), 'durable fact from the retired chunk must be in project memory');
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   // ---------------- unit: two-sided prompt blocks ----------------
@@ -836,7 +851,7 @@ async function main() {
     req.on('end', () => {
       const payload = JSON.parse(body);
       contextRequests.push(payload);
-      const isCompacted = payload.messages && payload.messages.some(m => String(m.content).includes('compacted') || String(m.content).includes('Compacted'));
+      const isCompacted = payload.messages && payload.messages.some(m => String(m.content).includes('[Older context retired'));
       if (payload.messages && payload.messages.length > 2 && !isCompacted) {
         // First request with long history: fail simulating Ollama context size limit reached
         res.writeHead(400, { 'Content-Type': 'application/json', 'Connection': 'close' });
@@ -920,7 +935,7 @@ async function main() {
     assert.strictEqual(contextErr, null, contextErr?.message);
     assert.strictEqual(contextResult, 'success after compaction');
     assert.strictEqual(testAgentContext.provider.contextTokens, 4096); // learned limit
-    assert(testAgentContext.session.messages.some(m => m.content.includes('compacted') || m.content.includes('Compacted')));
+    assert(testAgentContext.session.messages.some(m => m.content.includes('[Older context retired')));
   });
 
   // ---------------- unit: session history sanitization ----------------

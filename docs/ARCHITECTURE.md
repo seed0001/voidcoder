@@ -296,14 +296,51 @@ uses it for the cost summary and can rebuild on demand.
 ## 7. Context management
 
 - Estimated context = `JSON.stringify(messages).length / 3.6` tokens.
-- Auto-compaction triggers when that estimate exceeds
-  `contextTokens * compactAt` (default 200k × 0.75).
-- `compact()` keeps the last 4 messages, sends everything before that to the
-  `smallModel` (a cheaper model if configured; otherwise the main model) with a
-  dense summarization prompt, and replaces the history with the summary plus
-  the tail.
+- Two durable, structured stores live OUTSIDE `session.messages` and are
+  therefore never touched by compaction: the **roadmap**
+  (`session.todos`, written via `todowrite`, optionally grouped into
+  `phase` categories) and the **original task**
+  (`session.originalTask`, pinned once from the session-opening message).
+  Both are re-injected into every system prompt unconditionally
+  (`src/prompt.js`), so the model's plan and its "why am I here" survive
+  regardless of how much raw conversation gets retired.
+- Auto-compaction triggers when the estimate exceeds `contextTokens *
+  compactAt` (default 200k × 0.75) before a turn starts, and again at a 90%
+  guard checked every round inside the tool-calling loop (`_loop()` in
+  `src/agent.js`) — the latter exists because a single long, tool-heavy turn
+  can cross the budget mid-turn, before the next `send()` ever gets a chance
+  to check.
+- `Agent.compact()` (`src/agent.js` + `src/contextRetirement.js`) retires
+  history in bounded chunks, oldest first, instead of flattening the whole
+  conversation into one summary:
+  - The message list is grouped into atomic **units** first — a
+    `tool_calls` message plus all of its matching tool-result messages counts
+    as one unit, so a call/response pair is never split across a retirement
+    boundary, and the unit boundary is well-defined even when the very last
+    message in the list is a tool result (the previous "keep a verbatim
+    tail" logic came up empty in exactly that case, which is the normal
+    state mid-turn — see the git history for the failure mode this replaced).
+  - The most recent `PROTECT_UNITS` units (3) are never retired, whatever
+    their shape.
+  - Each call retires at most `CHUNK_UNITS` (6) of the oldest remaining
+    units. A small-model call extracts, in a fixed labeled format: roadmap
+    updates (existing items to mark `in_progress`/`completed`, by index —
+    status only ever moves forward, never regresses — plus new items to
+    append), durable facts worth persisting project-wide (appended to
+    `.voidcode-memory.md` via `project_memory`), and a short pointer
+    sentence. The retired chunk is replaced by a single
+    `[Older context retired — ...]` pointer message, not a growing
+    narrative.
+  - `send()` and the mid-turn guard both call `compactUntilUnder()`, which
+    retires chunks in a bounded loop until back under budget (or nothing
+    more is safely retirable).
 - Manual: `/compact` in the terminal, the compact button/IPC in the desktop.
 - Compaction failures are non-fatal (best-effort).
+- `FocusSession` (`src/focus.js`) has its own, separate, simpler compactor
+  (flatten-and-summarize with a verbatim tail) — it is not wired to
+  `contextRetirement.js`. Focus sessions are short-lived, time-boxed, and
+  discarded on completion, so the durable-roadmap problem this section
+  solves does not apply to them the same way.
 
 ---
 

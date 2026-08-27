@@ -12,7 +12,7 @@
     "start": "node bin/voidcode.js",
     "app": "electron app/main.js",
     "discord": "node bin/voidcode-discord.js",
-    "test": "node test/harness.test.js && node test/contextDb.test.js && node test/continuation.test.js && node test/focus.test.js && node test/modelCollapse.test.js && node test/containerIndexer.test.js && node test/containerScoping.test.js && node test/permissions.test.js && node test/discord/contacts.test.js && node test/discord/tiers.test.js && node test/discord/portfolio.test.js && node test/discord/sweepPrompt.test.js && node test/discord/discordOutput.test.js && node test/discord/scheduleFields.test.js",
+    "test": "node test/harness.test.js && node test/contextDb.test.js && node test/continuation.test.js && node test/contextRetirement.test.js && node test/midTurnCompaction.test.js && node test/focus.test.js && node test/modelCollapse.test.js && node test/containerIndexer.test.js && node test/containerScoping.test.js && node test/permissions.test.js && node test/discord/contacts.test.js && node test/discord/tiers.test.js && node test/discord/portfolio.test.js && node test/discord/sweepPrompt.test.js && node test/discord/discordOutput.test.js && node test/discord/scheduleFields.test.js",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "release": "node scripts/publish-release.js"
